@@ -1,0 +1,10 @@
+/target
+Cargo.lock.bak
+*.pcap
+*.bin
+.DS_Store
+control/panel-ui/node_modules
+notes-local/
+*.local.md
+__pycache__/
+*.pyc

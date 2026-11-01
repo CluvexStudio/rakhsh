@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 640" width="1800" height="640" role="img" aria-label="rakhsh topology: clients reach an entry node inside a filtered network, cross the filter over a chosen carrier, and reach an exit node on the open internet">
+  <defs>
+    <path id="cloud" d="M36,158 C12,158 0,140 0,120 C0,98 16,82 38,82 C40,48 70,22 108,22 C140,22 168,42 178,70 C190,58 208,52 226,56 C252,62 270,84 270,108 C292,104 312,118 316,138 C318,150 310,158 298,158 Z"/>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2B2B2B"/>
+    </marker>
+  </defs>
+
+  <rect width="1800" height="640" fill="#FBFAF7"/>
+
+  <g font-family="Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif">
+    <text x="36" y="52" font-size="27" font-weight="700" fill="#2B2B2B">rakhsh — how a tunnel is laid out</text>
+    <text x="36" y="82" font-size="18" fill="#5A5A5A">Any number of nodes on each side. Each one has its own key, so losing one changes nothing for the rest.</text>
+
+    <rect x="36" y="208" width="226" height="250" rx="10" fill="#ECEAE6" stroke="#6B6B6B" stroke-width="2"/>
+    <text x="54" y="240" font-size="19" font-weight="600" fill="#3A3A3A">your devices</text>
+    <rect x="62" y="258" width="174" height="58" rx="7" fill="#CFE2F3" stroke="#3B6EA5" stroke-width="2"/>
+    <text x="149" y="294" font-size="19" fill="#17324F" text-anchor="middle">browser</text>
+    <rect x="62" y="334" width="174" height="58" rx="7" fill="#CFE2F3" stroke="#3B6EA5" stroke-width="2"/>
+    <text x="149" y="370" font-size="19" fill="#17324F" text-anchor="middle">any app</text>
+
+    <path d="M262 287 H 322" stroke="#2B2B2B" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+    <path d="M262 363 V 452 H 322" stroke="#2B2B2B" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+
+    <rect x="328" y="250" width="200" height="76" rx="8" fill="#E8954E" stroke="#8A4418" stroke-width="2"/>
+    <text x="428" y="284" font-size="22" font-weight="700" fill="#3A1A06" text-anchor="middle">rakhsh</text>
+    <text x="428" y="308" font-size="17" fill="#4A2409" text-anchor="middle">entry</text>
+
+    <rect x="328" y="414" width="200" height="76" rx="8" fill="#F0B178" stroke="#8A4418" stroke-width="2"/>
+    <text x="428" y="448" font-size="22" font-weight="700" fill="#3A1A06" text-anchor="middle">rakhsh</text>
+    <text x="428" y="472" font-size="17" fill="#4A2409" text-anchor="middle">entry</text>
+
+    <g transform="translate(596,222)">
+      <use href="#cloud" fill="#E8A3A3" stroke="#9E3B3B" stroke-width="1.8"/>
+    </g>
+    <text x="754" y="420" font-size="22" font-weight="600" fill="#5E1E1E" text-anchor="middle">filtered network</text>
+
+    <rect x="964" y="168" width="34" height="356" rx="6" fill="#D96A6A" stroke="#8A2A2A" stroke-width="2"/>
+    <text x="981" y="150" font-size="21" font-weight="600" fill="#5E1E1E" text-anchor="middle">the filter</text>
+
+    <g transform="translate(1058,222)">
+      <use href="#cloud" fill="#A8C8EE" stroke="#36618E" stroke-width="1.8"/>
+    </g>
+    <text x="1216" y="420" font-size="22" font-weight="600" fill="#153A5E" text-anchor="middle">open internet</text>
+
+    <path d="M528 287 H 1398" stroke="#2B2B2B" stroke-width="4" fill="none"/>
+    <path d="M528 452 H 1398" stroke="#2B2B2B" stroke-width="3" stroke-dasharray="9 7" fill="none"/>
+
+    <rect x="1398" y="250" width="200" height="76" rx="8" fill="#E8954E" stroke="#8A4418" stroke-width="2"/>
+    <text x="1498" y="284" font-size="22" font-weight="700" fill="#3A1A06" text-anchor="middle">rakhsh</text>
+    <text x="1498" y="308" font-size="17" fill="#4A2409" text-anchor="middle">exit</text>
+
+    <rect x="1398" y="414" width="200" height="76" rx="8" fill="#F0B178" stroke="#8A4418" stroke-width="2"/>
+    <text x="1498" y="448" font-size="22" font-weight="700" fill="#3A1A06" text-anchor="middle">rakhsh</text>
+    <text x="1498" y="472" font-size="17" fill="#4A2409" text-anchor="middle">exit</text>
+
+    <path d="M1498 326 V 414" stroke="#8A4418" stroke-width="2.5" stroke-dasharray="7 6" fill="none"/>
+    <text x="1514" y="376" font-size="16" fill="#6A3310">spare</text>
+
+    <path d="M1598 287 H 1660" stroke="#2B2B2B" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+    <rect x="1664" y="250" width="110" height="76" rx="8" fill="#9CCB97" stroke="#3E7A3A" stroke-width="2"/>
+    <text x="1719" y="294" font-size="19" fill="#143C12" text-anchor="middle">the web</text>
+
+    <path d="M1598 452 H 1719 V 334" stroke="#2B2B2B" stroke-width="3" stroke-dasharray="9 7" fill="none" marker-end="url(#arrow)"/>
+
+    <path d="M60 568 H 128" stroke="#2B2B2B" stroke-width="4" fill="none"/>
+    <text x="142" y="574" font-size="17" fill="#3A3A3A">a lane — tcp · tls · wss · quic · kcp · raw · gre, whichever the network still lets through</text>
+    <path d="M60 604 H 128" stroke="#2B2B2B" stroke-width="3" stroke-dasharray="9 7" fill="none"/>
+    <text x="142" y="610" font-size="17" fill="#3A3A3A">the spare — taken over when the first stops answering, without dropping what is open</text>
+  </g>
+</svg>

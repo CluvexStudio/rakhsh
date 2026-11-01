@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rakhsh — banner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=IBM+Plex+Mono:wght@400;500&family=Vazirmatn:wght@400&display=swap">
+<style>
+  html, body { margin: 0; padding: 0; background: #16100D; }
+  .board {
+    width: 1280px; height: 640px; position: relative; overflow: hidden;
+    background: #16100D; font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  .glow { position: absolute; inset: 0; background: radial-gradient(130% 90% at 88% 50%, #3A2415 0%, #16100D 62%); }
+  .wall { position: absolute; inset: 0; background: #20160F; }
+  .wall.top { clip-path: polygon(0 0, 100% 0, 100% 30%, 55% 42%, 0 26%); }
+  .wall.bottom { clip-path: polygon(0 100%, 100% 100%, 100% 70%, 55% 58%, 0 74%); }
+  .scrim { position: absolute; left: 0; top: 0; bottom: 0; width: 62%;
+    background: linear-gradient(90deg, #16100D 0%, #16100D 58%, rgba(22,16,13,0.82) 82%, rgba(22,16,13,0) 100%); }
+  .copy { position: absolute; left: 76px; top: 72px; right: 520px; }
+  .name { font-family: 'Cormorant Garamond', serif; font-weight: 600; font-size: 118px;
+    line-height: 1; letter-spacing: 0.08em; color: #F4EBE0; }
+  .kicker { margin-top: 16px; font-size: 15px; font-weight: 500; letter-spacing: 0.34em; color: #E07A3E; }
+  .rule { margin-top: 26px; width: 92px; height: 2px; background: #C2521F; }
+  .lede { margin: 22px 0 0; font-size: 19px; line-height: 1.62; color: #CFC0B0; max-width: 580px; }
+  .chips { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { font-size: 13px; font-weight: 500; letter-spacing: 0.04em; color: #EADBCB;
+    border: 1px solid #45301F; border-radius: 3px; padding: 7px 12px; }
+  .seal { position: absolute; left: 76px; bottom: 54px; right: 76px; text-align: left;
+    font-family: Vazirmatn, 'Noto Naskh Arabic', serif; font-size: 17px; line-height: 1.8;
+    color: #B79B86; direction: rtl; unicode-bidi: isolate; }
+</style>
+</head>
+<body>
+<div class="board">
+  <div class="glow" aria-hidden="true"></div>
+  <div class="wall top" aria-hidden="true"></div>
+  <div class="wall bottom" aria-hidden="true"></div>
+  <div id="marks" aria-hidden="true"></div>
+  <div class="scrim" aria-hidden="true"></div>
+
+  <div class="copy">
+    <div class="name">RAKHSH</div>
+    <div class="kicker">A NETWORK CORE</div>
+    <div class="rule"></div>
+    <p class="lede">Direct, or tunnelled across as many servers as you have. Authenticated,
+      multiplexed, and built to keep working on networks made to stop it.</p>
+    <div class="chips">
+      <span class="chip">Noise IKpsk2 · AES-256-GCM</span>
+      <span class="chip">tcp · tls · wss · quic · kcp · raw</span>
+      <span class="chip">many nodes, one failover</span>
+    </div>
+  </div>
+
+  <div class="seal">رخش، اسبِ رستم؛ همان که او را از هفت‌خان گذراند</div>
+</div>
+
+<script>
+  const accent = '#E07A3E';
+  const marks = document.getElementById('marks');
+  const add = (css) => { const d = document.createElement('div'); d.style.cssText = css; marks.appendChild(d); };
+
+  for (let i = 0; i < 7; i++) {
+    const t = i / 6;
+    const left = 30 + t * 62;
+    const top = left < 55 ? 26 + (left / 55) * 16 : 42 - ((left - 55) / 45) * 12;
+    add(`position:absolute;left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:2px;height:16px;background:${accent};opacity:.55`);
+  }
+
+  const n = 22;
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const left = 8 + Math.pow(t, 1.85) * 84;
+    const width = 8 + Math.pow(t, 1.3) * 104;
+    const drift = Math.sin(t * 3.4) * 1.5;
+    const fade = 0.2 + Math.pow(t, 0.8) * 0.8;
+    add(`position:absolute;left:${left.toFixed(2)}%;top:${(50 + drift).toFixed(2)}%;width:${width.toFixed(0)}px;height:3px;border-radius:2px;background:${accent};opacity:${fade.toFixed(2)};transform:translateY(-50%)`);
+  }
+</script>
+</body>
+</html>

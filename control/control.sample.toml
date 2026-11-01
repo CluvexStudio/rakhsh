@@ -1,0 +1,32 @@
+# rakhsh Control Center
+listen = "0.0.0.0:8443"
+password = "change-me"          # panel password (empty = no auth; only behind a trusted network)
+# tls_cert = "/etc/rakhsh/panel.crt"   # your own PEM cert + key; omit for a self-signed pair
+# tls_key  = "/etc/rakhsh/panel.key"
+refresh = 2                      # seconds between fleet refreshes
+
+# Alerts + bot commands over Telegram (optional). Get a token from @BotFather and your
+# chat id from @userinfobot. The bot answers only in this chat.
+# [telegram]
+# token = "123456:ABC-DEF..."
+# chat = 123456789
+# loss_pct = 5                   # alert when a lane's loss exceeds this
+# cpu_pct = 92                   # alert when system CPU exceeds this
+# quota_pct = 95                 # alert when a quota is this full
+
+# One [[node]] per rakhsh daemon. A node on THIS host needs only its socket;
+# a remote node is reached with `rakhsh status`/`rakhsh speedtest` over SSH (no extra daemon port).
+
+[[node]]
+name = "this-host"
+socket = "/run/rakhsh.sock"
+# unit = "rakhsh"                # systemd unit for Logs + Restart/Stop/Start
+# config_path = "/etc/rakhsh.toml"   # for config backups
+# restart_at = "04:30"          # daily local time to auto-restart this node
+
+# [[node]]
+# name = "asia-entry"
+# ssh = "root@203.0.113.9"
+# socket = "/run/rakhsh.sock"
+# unit = "rk-entry"
+# config_path = "/root/rakhsh.toml"

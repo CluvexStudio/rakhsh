@@ -1,0 +1,57 @@
+[package]
+name = "rakhsh"
+version = "0.1.0"
+edition = "2021"
+description = "A fast, authenticated, multiplexed tunnel between two servers."
+license = "AGPL-3.0-only"
+repository = "https://github.com/CluvexStudio/rakhsh"
+
+[[bin]]
+name = "rakhsh"
+path = "src/main.rs"
+
+[dependencies]
+# The transport protocol is its own project, in its own repository: it has no
+# idea rakhsh exists, so it can be depended on, audited and released on its own.
+# Clone the two side by side for development; swap in the git or registry form
+# to build rakhsh on its own.
+shabdiz = { path = "../shabdiz" }
+# shabdiz = { git = "https://github.com/CluvexStudio/shabdiz", tag = "v0.1.0" }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "time", "signal"] }
+bytes = "=1.12.1"
+snow = { version = "=0.10.0", features = ["ring-accelerated", "risky-raw-split"] }
+blake3 = "=1.8.7"
+base64 = "=0.22.1"
+ring = "=0.17.14"
+serde_json = "=1.0.154"
+mimalloc = { version = "=0.1.52", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+toml = "=1.1.8"
+clap = { version = "=4.6.7", features = ["derive"] }
+anyhow = "=1.0.104"
+thiserror = "=2.0.21"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+async-trait = "=0.1.92"
+futures-util = { version = "=0.3.34", features = ["sink"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls-pki-types = "=1.15.1"
+rcgen = "=0.14.10"
+tokio-tungstenite = "=0.30.0"
+quinn = { version = "=0.11.12", default-features = false, features = ["runtime-tokio","rustls-ring","log"] }
+tokio_kcp = "=0.9.8"
+tun-rs = { version = "=2.8.13", features = ["async_tokio"] }
+socket2 = "=0.6.5"
+reed-solomon-simd = "=3.1.0"
+libc = "=0.2.191"
+rama = { git = "https://github.com/plabayo/rama", rev = "ec92b76", default-features = false, features = ["quic", "rustls", "ring"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[workspace]
+members = ["control"]

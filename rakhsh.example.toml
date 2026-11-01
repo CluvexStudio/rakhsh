@@ -1,0 +1,211 @@
+# Every key rakhsh understands, with a working value for each.
+# Run `rakhsh init` or `rakhsh fleet` to get a real config with real keys;
+# this file is here so the whole surface is visible in one place, and
+# `rakhsh check -c rakhsh.example.toml` will read it back to you in prose.
+#
+# Anything left out takes the default noted beside it.
+# TOML rule: every plain key below belongs to the file itself, so they all
+# come before the first [table].
+
+# ─── identity ──────────────────────────────────────────────────────────────
+role = "entry"                  # entry · exit · node
+token = "ERERERERERERERERERERERERERERERERERERERERERE="
+static_secret = "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="
+peer_public = "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="
+encryption = "full"             # full (default) · none
+resume = true                   # keep streams alive across a lane's death
+resume_grace = 60               # seconds a stream waits for a lane, default 60
+
+# ─── where the tunnel lives ────────────────────────────────────────────────
+tunnel_listen = "0.0.0.0:7000"  # the side that accepts lanes
+tunnel_connect = "203.0.113.9:7000"
+dial = "exit"                   # which side opens the flow: exit (default) · entry
+lanes = 4                       # lanes the dialling side opens, default 4
+max_connections = 4096          # concurrent streams, default unlimited
+heartbeat = 10                  # seconds, default from `preset`
+keepalive = 30                  # seconds, default from `preset`
+preset = "balance"              # balance (default) · turbo · aggressive · throughput
+control_socket = "/run/rakhsh.sock"
+access_log = false
+mss_clamp = 1380
+so_rcvbuf = 8388608
+so_sndbuf = 4194304
+
+# ─── carrier ───────────────────────────────────────────────────────────────
+carrier = "wss"                 # tcp · tls · ws · wss · quic · quicv2 · kcp
+                                # faketcp · icmp · spoof · l2tcp
+                                # shabdiz-gre · shabdiz-l2 · shabdiz-udp · shabdiz-tcp
+sni = "www.cloudflare.com"      # TLS name and WS Host for tls/ws/wss
+ws_path = "/live"
+ws_credential = "a-shared-string"
+decoy = true                    # serve a decoy site to anything that is not us
+tls_fingerprint = "chrome"      # chrome (default) · firefox · rustls
+tls_frag = 64                   # split the opening bytes into pieces this size
+edge_ip = "1.1.1.1:443"         # dial a CDN edge, present `sni` as the name
+# cert_path = "/etc/rakhsh/fullchain.pem"   # a real certificate instead of self-signed
+# key_path  = "/etc/rakhsh/privkey.pem"
+quic_mask = false
+quic_version = 4278190109       # 0xff00001d, a draft version
+congestion = "bbr"              # bbr (default) · cubic
+# bind = "203.0.113.5"            # source address for lanes; must exist on this host
+peer_ip = "203.0.113.9"         # the peer's address; raw carriers need it on both ends
+
+# ─── pacing, for carriers that put datagrams on the wire ───────────────────
+pace_burst = 12                 # datagrams per write
+pace_gap_us = 1000              # microseconds between groups
+pace_pps = 9000                 # datagrams a second; the knob to set once measured
+pace_auto = false               # let the carrier find its own rate instead
+
+# ─── raw carriers: forged packets ──────────────────────────────────────────
+reliability = "quic"            # quic (default) · kcp
+fec_data = 0                    # measure before turning this on
+fec_parity = 0
+spoof_src_ip = "198.51.100.7"
+spoof_src_pool = "198.51.100.8,198.51.100.9"
+spoof_peer_ip = "203.0.113.9"
+spoof_peer_src = "203.0.113.10"
+spoof_sockbuf = 4194304
+spoof_ttl_jitter = false
+spoof_dscp_jitter = false
+spoof_rotate_secs = 0
+link_encrypt = true
+
+# ─── layer 3: a tun device instead of forwards ─────────────────────────────
+l3_addr = "10.77.0.1/30"
+l3_mtu = 1380
+l3_gre = false
+gre_key = 0
+l3_auto_mtu = true
+l3_qdisc = "fq"
+l3_txqueuelen = 1000
+l3_paths = 1
+
+# ─── more ways to reach the same peer ──────────────────────────────────────
+backup_connect = ["203.0.113.9:7443", "203.0.113.9:8443"]
+link_policy = "failover"        # failover (default) · spread
+link_timeout = 10               # seconds to wait for one attempt
+link_probe = 30                 # seconds between checks for a better link
+
+# ─── quotas and rates for the whole node ───────────────────────────────────
+limit = "200mbit"
+limit_up = "100mbit"
+limit_down = "200mbit"
+limit_per_stream = "20mbit"
+quota = "500gb"
+quota_period = "month"          # day · week · month · never
+quota_state = "/var/lib/rakhsh/quota.json"
+
+# ─── reading forwards from a panel, and syncing them to the other side ─────
+xui_panel = "https://panel.example:2053"
+xui_token = "a-session-cookie-or-token"
+xui_interval = 60
+xui_target_host = "127.0.0.1"
+xui_proxy_protocol = false
+accept_sync = false
+sync_listen = "127.0.0.1:7777"
+sync_ports = ["443", "8443"]
+
+# ─── more peers: one entry per node on the other side ──────────────────────
+[[peer]]
+name = "de"
+public = "REREREREREREREREREREREREREREREREREREREREREQ="
+connect = "203.0.113.20:7000"   # only on the side that dials
+
+[[peer]]
+name = "nl"
+public = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
+connect = "203.0.113.21:7000"
+
+# ─── another carrier to the same peer ──────────────────────────────────────
+[[link]]
+carrier = "quic"
+addr = "203.0.113.9:7443"
+sni = "www.cloudflare.com"
+ws_path = "/live"
+ws_credential = "a-shared-string"
+decoy = true
+edge_ip = "1.1.1.1:443"
+tls_fingerprint = "firefox"
+tls_frag = 48
+pace_burst = 12
+pace_gap_us = 1000
+pace_pps = 9000
+pace_auto = false
+quic_mask = false
+quic_version = 4278190109
+reliability = "quic"
+# cert_path = "/etc/rakhsh/fullchain.pem"
+# key_path  = "/etc/rakhsh/privkey.pem"
+
+# ─── forwarded ports ───────────────────────────────────────────────────────
+[[forward]]
+listen = "0.0.0.0:443"
+target = "127.0.0.1:8443"
+udp = false
+proxy_protocol = false
+limit = "50mbit"
+limit_up = "25mbit"
+limit_down = "50mbit"
+limit_per_stream = "10mbit"
+quota = "100gb"
+quota_period = "month"
+
+[[forward]]
+listen = "0.0.0.0:51820"
+target = "127.0.0.1:51820"
+udp = true
+
+# ─── the proxy side: inbounds, outbounds, routing ──────────────────────────
+[[inbound]]
+tag = "proxy"
+type = "mixed"                  # mixed · socks · http
+listen = "127.0.0.1:1080"
+username = "user"
+password = "pass"
+limit = "80mbit"
+quota = "50gb"
+quota_period = "day"
+
+[[outbound]]
+tag = "tunnel"
+type = "tunnel"
+
+[[outbound]]
+tag = "direct"
+type = "direct"
+
+[[outbound]]
+tag = "block"
+type = "block"
+
+[[outbound]]
+tag = "upstream"
+type = "socks"                  # socks · http
+server = "127.0.0.1:9050"
+username = "user"
+password = "pass"
+
+[route]
+final = "tunnel"                # the outbound used when no rule matches
+resolve = false                 # resolve names before matching ip_cidr rules
+
+[[route.rule]]
+outbound = "direct"
+inbound = ["proxy"]
+domain = ["example.com"]
+domain_suffix = [".ir"]
+domain_keyword = ["internal"]
+ip_cidr = ["10.0.0.0/8", "192.168.0.0/16"]
+port = ["80", "8000-8100"]
+# rule_file = "/etc/rakhsh/iran.txt"
+
+# ─── the built-in resolver ─────────────────────────────────────────────────
+[dns]
+listen = "127.0.0.1:5353"
+local = ["1.1.1.1:53", "8.8.8.8:53"]
+remote = ["1.1.1.1:53"]
+cache = 4096
+cache_min_ttl = 60
+cache_max_ttl = 3600
+timeout = 5
+allow = ["127.0.0.0/8", "10.0.0.0/8"]

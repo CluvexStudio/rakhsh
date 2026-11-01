@@ -1,0 +1,26 @@
+[package]
+name = "rakhsh-control"
+version = "0.1.0"
+edition = "2021"
+description = "rakhsh Control Center: web panel + Telegram bot over a fleet of rakhsh nodes."
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "rakhsh-control"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "time", "process", "signal"] }
+axum = "=0.8.9"
+axum-server = { version = "=0.8.0", features = ["tls-rustls"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+anyhow = "=1.0.104"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+clap = { version = "=4.6.7", features = ["derive"] }
+toml = "=1.1.8"
+rcgen = "=0.14.10"
+futures-util = "=0.3.34"
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+teloxide = { version = "=0.17.0", default-features = false, features = ["macros", "ctrlc_handler", "rustls"] }

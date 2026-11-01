@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1740 1160" width="1740" height="1160" role="img" aria-label="A request through rakhsh, step by step: the lane handshake, opening a stream, carrying bytes both ways, and what happens when a lane dies">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2B2B2B"/>
+    </marker>
+  </defs>
+  <rect width="1740" height="1160" fill="#FBFAF7"/>
+  <g font-family="Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif">
+
+    <text x="36" y="46" font-size="26" font-weight="700" fill="#2B2B2B">rakhsh — one request, end to end</text>
+
+    <line x1="180" y1="118" x2="180" y2="1046" stroke="#9A9A9A" stroke-width="1.5"/>
+    <line x1="640" y1="118" x2="640" y2="1046" stroke="#9A9A9A" stroke-width="1.5"/>
+    <line x1="1160" y1="118" x2="1160" y2="1046" stroke="#9A9A9A" stroke-width="1.5"/>
+    <line x1="1590" y1="118" x2="1590" y2="1046" stroke="#9A9A9A" stroke-width="1.5"/>
+
+    <rect x="80" y="70" width="200" height="48" rx="7" fill="#CFE2F3" stroke="#3B6EA5" stroke-width="2"/>
+    <text x="180" y="100" font-size="18" fill="#17324F" text-anchor="middle">browser</text>
+    <rect x="540" y="70" width="200" height="48" rx="7" fill="#E8954E" stroke="#8A4418" stroke-width="2"/>
+    <text x="640" y="100" font-size="18" font-weight="600" fill="#3A1A06" text-anchor="middle">rakhsh entry</text>
+    <rect x="1060" y="70" width="200" height="48" rx="7" fill="#E8954E" stroke="#8A4418" stroke-width="2"/>
+    <text x="1160" y="100" font-size="18" font-weight="600" fill="#3A1A06" text-anchor="middle">rakhsh exit</text>
+    <rect x="1490" y="70" width="200" height="48" rx="7" fill="#9CCB97" stroke="#3E7A3A" stroke-width="2"/>
+    <text x="1590" y="100" font-size="18" fill="#143C12" text-anchor="middle">the site</text>
+
+    <rect x="660" y="140" width="480" height="56" rx="5" fill="#FFFFFF" stroke="#8A4418" stroke-width="1.6" stroke-dasharray="6 4"/>
+    <text x="900" y="164" font-size="15" font-weight="600" fill="#3A1A06" text-anchor="middle">once per lane: Noise IKpsk2, static keys pinned</text>
+    <text x="900" y="184" font-size="15" fill="#4A2409" text-anchor="middle">then AES-256-GCM on every record that follows</text>
+
+    <line x1="180" y1="240" x2="632" y2="240" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="406" y="232" font-size="15" fill="#2B2B2B" text-anchor="middle">CONNECT site.example:443</text>
+
+    <rect x="470" y="262" width="340" height="52" rx="5" fill="#FFFFFF" stroke="#8A4418" stroke-width="1.6" stroke-dasharray="6 4"/>
+    <text x="640" y="284" font-size="15" font-weight="600" fill="#3A1A06" text-anchor="middle">the router decides: tunnel, or direct</text>
+    <text x="640" y="304" font-size="15" fill="#4A2409" text-anchor="middle">then picks a lane and numbers the stream</text>
+
+    <line x1="640" y1="356" x2="1152" y2="356" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="896" y="348" font-size="15" fill="#2B2B2B" text-anchor="middle">open stream 7 → site.example:443</text>
+
+    <line x1="1160" y1="404" x2="1582" y2="404" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="1371" y="396" font-size="15" fill="#2B2B2B" text-anchor="middle">TCP connect</text>
+    <line x1="1590" y1="444" x2="1168" y2="444" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="1379" y="436" font-size="15" fill="#2B2B2B" text-anchor="middle">connected</text>
+
+    <line x1="1160" y1="492" x2="648" y2="492" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="904" y="484" font-size="15" fill="#2B2B2B" text-anchor="middle">stream 7 is open</text>
+    <line x1="640" y1="532" x2="188" y2="532" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="414" y="524" font-size="15" fill="#2B2B2B" text-anchor="middle">200 connection established</text>
+
+    <line x1="180" y1="580" x2="632" y2="580" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="406" y="572" font-size="15" fill="#2B2B2B" text-anchor="middle">TLS to the site, which rakhsh never opens</text>
+
+    <rect x="470" y="602" width="340" height="52" rx="5" fill="#FFFFFF" stroke="#8A4418" stroke-width="1.6" stroke-dasharray="6 4"/>
+    <text x="640" y="624" font-size="15" font-weight="600" fill="#3A1A06" text-anchor="middle">one record per chunk, sealed</text>
+    <text x="640" y="644" font-size="15" fill="#4A2409" text-anchor="middle">a stream may only send what it has credit for</text>
+
+    <line x1="640" y1="696" x2="1152" y2="696" stroke="#2B2B2B" stroke-width="2.5" marker-end="url(#a)"/>
+    <text x="896" y="688" font-size="15" fill="#2B2B2B" text-anchor="middle">data, stream 7</text>
+    <line x1="1160" y1="736" x2="1582" y2="736" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="1371" y="728" font-size="15" fill="#2B2B2B" text-anchor="middle">the same bytes, untouched</text>
+
+    <line x1="1590" y1="784" x2="1168" y2="784" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="1379" y="776" font-size="15" fill="#2B2B2B" text-anchor="middle">the answer</text>
+    <line x1="1160" y1="824" x2="648" y2="824" stroke="#2B2B2B" stroke-width="2.5" marker-end="url(#a)"/>
+    <text x="904" y="816" font-size="15" fill="#2B2B2B" text-anchor="middle">data, stream 7</text>
+    <line x1="640" y1="864" x2="188" y2="864" stroke="#2B2B2B" stroke-width="2" marker-end="url(#a)"/>
+    <text x="414" y="856" font-size="15" fill="#2B2B2B" text-anchor="middle">the answer</text>
+
+    <line x1="36" y1="906" x2="1704" y2="906" stroke="#B9342F" stroke-width="1.5" stroke-dasharray="8 6"/>
+    <text x="36" y="898" font-size="16" font-weight="600" fill="#B9342F">and if that lane dies</text>
+
+    <rect x="440" y="928" width="400" height="74" rx="5" fill="#FFFFFF" stroke="#B9342F" stroke-width="1.6" stroke-dasharray="6 4"/>
+    <text x="640" y="952" font-size="15" font-weight="600" fill="#7A211D" text-anchor="middle">the other lanes carry on</text>
+    <text x="640" y="972" font-size="15" fill="#7A211D" text-anchor="middle">stream 7 moves to one of them and asks</text>
+    <text x="640" y="992" font-size="15" fill="#7A211D" text-anchor="middle">to start again at the last acknowledged byte</text>
+
+    <line x1="640" y1="1030" x2="1152" y2="1030" stroke="#B9342F" stroke-width="2" marker-end="url(#a)"/>
+    <text x="896" y="1022" font-size="15" fill="#7A211D" text-anchor="middle">resume stream 7 from that offset — the browser never knew</text>
+
+    <rect x="80" y="1070" width="200" height="48" rx="7" fill="#CFE2F3" stroke="#3B6EA5" stroke-width="2"/>
+    <text x="180" y="1100" font-size="18" fill="#17324F" text-anchor="middle">browser</text>
+    <rect x="540" y="1070" width="200" height="48" rx="7" fill="#E8954E" stroke="#8A4418" stroke-width="2"/>
+    <text x="640" y="1100" font-size="18" font-weight="600" fill="#3A1A06" text-anchor="middle">rakhsh entry</text>
+    <rect x="1060" y="1070" width="200" height="48" rx="7" fill="#E8954E" stroke="#8A4418" stroke-width="2"/>
+    <text x="1160" y="1100" font-size="18" font-weight="600" fill="#3A1A06" text-anchor="middle">rakhsh exit</text>
+    <rect x="1490" y="1070" width="200" height="48" rx="7" fill="#9CCB97" stroke="#3E7A3A" stroke-width="2"/>
+    <text x="1590" y="1100" font-size="18" fill="#143C12" text-anchor="middle">the site</text>
+  </g>
+</svg>
