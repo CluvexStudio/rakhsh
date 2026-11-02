@@ -105,6 +105,21 @@ accept_sync = false
 sync_listen = "127.0.0.1:7777"
 sync_ports = ["443", "8443"]
 
+# ─── carrying an OpenVPN server ────────────────────────────────────────────
+# `rakhsh openvpn -c this.toml` prints the directives for both OpenVPN ends,
+# with the tun-mtu worked out from the carrier. Needs a matching [[forward]]:
+# udp = true for proto = "udp", a stream forward for proto = "tcp".
+[openvpn]
+proto = "udp"                   # udp · tcp
+port = 1194
+device = "tun"                  # tun · tap
+crypto = "aead"                 # aead (default) · cbc-sha1 · cbc-sha256 · cbc-sha512
+server = "127.0.0.1:1194"       # where the OpenVPN server is, from the exit
+compress = false                # adds one byte of framing per packet
+peer_id = true                  # OpenVPN 2.4+ negotiates a 3-byte peer id
+# listen = "0.0.0.0:1194"       # defaults to 0.0.0.0:<port>
+# overhead = 24                 # override the computed per-packet overhead
+
 # ─── more peers: one entry per node on the other side ──────────────────────
 [[peer]]
 name = "de"
@@ -153,6 +168,12 @@ quota_period = "month"
 [[forward]]
 listen = "0.0.0.0:51820"
 target = "127.0.0.1:51820"
+udp = true
+
+# the forward the [openvpn] section above pairs with
+[[forward]]
+listen = "0.0.0.0:1194"
+target = "127.0.0.1:1194"
 udp = true
 
 # ─── the proxy side: inbounds, outbounds, routing ──────────────────────────

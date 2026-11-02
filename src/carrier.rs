@@ -884,6 +884,12 @@ mod tls {
     use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 
+    pub fn provider() -> Arc<CryptoProvider> {
+        static P: std::sync::OnceLock<Arc<CryptoProvider>> = std::sync::OnceLock::new();
+        P.get_or_init(|| Arc::new(rustls::crypto::ring::default_provider()))
+            .clone()
+    }
+
     pub fn server_cert(
         sni: &str,
     ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
@@ -903,7 +909,9 @@ mod tls {
             (Some(c), Some(k)) => load_pem(c, k)?,
             _ => server_cert(sni)?,
         };
-        let mut cfg = rustls::ServerConfig::builder()
+        let mut cfg = rustls::ServerConfig::builder_with_provider(provider())
+            .with_safe_default_protocol_versions()
+            .context("selecting TLS versions")?
             .with_no_client_auth()
             .with_single_cert(certs, key)
             .context("building server TLS config")?;
@@ -966,10 +974,12 @@ mod tls {
     }
 
     pub fn client_config_noverify() -> rustls::ClientConfig {
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        rustls::ClientConfig::builder()
+        let p = provider();
+        rustls::ClientConfig::builder_with_provider(p.clone())
+            .with_safe_default_protocol_versions()
+            .expect("ring supports the default TLS versions")
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoVerify(provider)))
+            .with_custom_certificate_verifier(Arc::new(NoVerify(p)))
             .with_no_client_auth()
     }
 
@@ -1153,11 +1163,12 @@ mod quic {
 
     pub fn server_config(sni: &str) -> Result<quinn::ServerConfig> {
         let (certs, key) = super::tls::server_cert(sni)?;
-        let mut crypto =
-            rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
-                .with_no_client_auth()
-                .with_single_cert(certs, key)
-                .context("quic server crypto")?;
+        let mut crypto = rustls::ServerConfig::builder_with_provider(super::tls::provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .context("quic server TLS version")?
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .context("quic server crypto")?;
         crypto.alpn_protocols = ALPN.iter().map(|p| p.to_vec()).collect();
         let mut cfg = quinn::ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(crypto).context("quic server config")?,
@@ -1167,12 +1178,13 @@ mod quic {
     }
 
     pub fn client_config(version: u32) -> Result<quinn::ClientConfig> {
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let mut crypto =
-            rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(super::tls::NoVerify(provider)))
-                .with_no_client_auth();
+        let p = super::tls::provider();
+        let mut crypto = rustls::ClientConfig::builder_with_provider(p.clone())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .context("quic client TLS version")?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(super::tls::NoVerify(p)))
+            .with_no_client_auth();
         crypto.alpn_protocols = ALPN.iter().map(|p| p.to_vec()).collect();
         let mut cfg = quinn::ClientConfig::new(Arc::new(
             QuicClientConfig::try_from(crypto).context("quic client config")?,

@@ -4,12 +4,21 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-struct Daemon(Child);
+struct Daemon {
+    child: Child,
+    log: std::path::PathBuf,
+}
+
+impl Daemon {
+    fn complaint(&self) -> String {
+        std::fs::read_to_string(&self.log).unwrap_or_default()
+    }
+}
 
 impl Drop for Daemon {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -114,20 +123,31 @@ fn a_tunnel_carries_traffic_end_to_end() {
         assert!(said.contains("config OK"), "{}: {said}", file.display());
     }
 
-    let spawn = |file: &std::path::Path| {
-        Daemon(
-            Command::new(bin)
+    let spawn = |file: &std::path::Path, name: &str| {
+        let log = dir.join(format!("{name}.log"));
+        let sink = std::fs::File::create(&log).expect("a log file for the daemon");
+        Daemon {
+            child: Command::new(bin)
                 .args(["run", "-c", &file.display().to_string()])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(Stdio::from(sink))
                 .spawn()
                 .expect("the daemon starts"),
-        )
+            log,
+        }
     };
-    let _far = spawn(&exit);
-    assert!(wait_for(tunnel, Duration::from_secs(20)), "the far side listens");
-    let _near = spawn(&entry);
-    assert!(wait_for(socks, Duration::from_secs(20)), "the near side offers a proxy");
+    let far = spawn(&exit, "exit");
+    assert!(
+        wait_for(tunnel, Duration::from_secs(20)),
+        "the far side listens on {tunnel}; it said:\n{}",
+        far.complaint()
+    );
+    let near = spawn(&entry, "entry");
+    assert!(
+        wait_for(socks, Duration::from_secs(20)),
+        "the near side offers a proxy on {socks}; it said:\n{}",
+        near.complaint()
+    );
 
     let mut through = socks_connect(socks, echo);
     let sent = b"the quick brown fox crosses the tunnel";

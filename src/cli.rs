@@ -1,5 +1,6 @@
 use crate::{
-    config, dgram, engine, entry, exit, fleet, limits, links, noise, raw, resume, status, xui,
+    config, dgram, engine, entry, exit, fleet, limits, links, noise, openvpn, raw, resume, status,
+    xui,
 };
 use anyhow::{bail, Context, Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
@@ -74,6 +75,10 @@ pub struct InitArgs {
     dns: Option<String>,
     #[arg(long, default_value_t = false)]
     split_iran: bool,
+    #[arg(long)]
+    openvpn: Option<String>,
+    #[arg(long)]
+    peer_ip: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -112,6 +117,10 @@ enum Cmd {
         side: SpoofSide,
     },
     Check {
+        #[arg(short, long)]
+        config: PathBuf,
+    },
+    Openvpn {
         #[arg(short, long)]
         config: PathBuf,
     },
@@ -296,6 +305,32 @@ pub async fn run() -> Result<()> {
                     );
                 }
             }
+            for f in &cfg.forward {
+                f.listen.parse::<std::net::SocketAddr>().with_context(|| {
+                    format!(
+                        "[[forward]] listen = {:?} is not an address:port (one entry needs a \
+                         listen and a target, as in listen = \"0.0.0.0:443\", target = \
+                         \"127.0.0.1:8443\")",
+                        f.listen
+                    )
+                })?;
+                let (host, port) = f.target.rsplit_once(':').with_context(|| {
+                    format!("[[forward]] target = {:?} needs a host:port", f.target)
+                })?;
+                if host.is_empty() || port.parse::<u16>().is_err() {
+                    anyhow::bail!("[[forward]] target = {:?} needs a host:port", f.target);
+                }
+                println!(
+                    "forward {} {} -> {}",
+                    if f.udp { "udp" } else { "tcp" },
+                    f.listen,
+                    f.target
+                );
+            }
+            openvpn::validate(&cfg)?;
+            for line in openvpn::describe(&cfg) {
+                println!("{line}");
+            }
             for line in limits::describe(&cfg)? {
                 println!("limits — {line}");
             }
@@ -328,6 +363,11 @@ pub async fn run() -> Result<()> {
                 println!("core: {}", engine::validate(&cfg)?);
             }
             println!("config OK");
+        }
+        Cmd::Openvpn { config } => {
+            let cfg = config::Config::load(&config)?;
+            openvpn::validate(&cfg)?;
+            print!("{}", openvpn::directives(&cfg)?);
         }
         Cmd::Status {
             config,
@@ -494,7 +534,14 @@ fn init(args: &InitArgs) -> Result<()> {
         proxy,
         dns,
         split_iran,
+        openvpn: ovpn,
+        peer_ip: far_ip,
     } = args;
+    let far_ip = far_ip.as_deref();
+    let ovpn = match ovpn.as_deref() {
+        Some(spec) => Some(openvpn::OpenVpn::parse_spec(spec)?),
+        None => None,
+    };
     let (direct, lanes, resume, split_iran) = (*direct, *lanes, *resume, *split_iran);
     let (resume_grace, link_policy) = (*resume_grace, link_policy.as_deref());
     let (proxy, dns) = (proxy.as_deref(), dns.as_deref());
@@ -542,7 +589,14 @@ fn init(args: &InitArgs) -> Result<()> {
                 break;
             }
         }
-        let (l, t) = spec.split_once('=').unwrap_or((spec, spec));
+        let (l, t) = spec.split_once('=').with_context(|| {
+            format!(
+                "--forward {f:?} needs listen=target, as in 0.0.0.0:443=127.0.0.1:8443 \
+                 (add /udp for a datagram forward, /pp for PROXY protocol)"
+            )
+        })?;
+        l.parse::<std::net::SocketAddr>()
+            .with_context(|| format!("--forward {f:?}: {l:?} is not an address:port"))?;
         fwd_toml.push_str(&format!(
             "\n[[forward]]\nlisten = \"{l}\"\ntarget = \"{t}\"\n"
         ));
@@ -552,6 +606,12 @@ fn init(args: &InitArgs) -> Result<()> {
         if pp {
             fwd_toml.push_str("proxy_protocol = true\n");
         }
+    }
+
+    let mut ovpn_toml = String::new();
+    if let Some(ov) = &ovpn {
+        fwd_toml.push_str(&openvpn::forward_toml(ov));
+        ovpn_toml.push_str(&openvpn::config_toml(ov));
     }
 
     let common = |extra: &str| -> String {
@@ -634,15 +694,34 @@ fn init(args: &InitArgs) -> Result<()> {
         }
     }
 
+    let raw_peer = matches!(
+        carrier,
+        "faketcp" | "l2tcp" | "icmp" | "spoof" | "shabdiz-gre" | "shabdiz-l2"
+    );
+    let (dials_peer_ip, listens_peer_ip) = if raw_peer {
+        let listens = match far_ip {
+            Some(ip) => format!("peer_ip = \"{ip}\"\n"),
+            None => format!(
+                "# This carrier forges its own packets, so it has no socket to learn the far \
+                 end's\n# address from. Set peer_ip to the {} public address, or pass \
+                 --peer-ip to\n# `rakhsh init` to have it written here.\n# \
+                 peer_ip = \"203.0.113.9\"\n",
+                if direct { "exit's" } else { "entry's" }
+            ),
+        };
+        (format!("peer_ip = \"{host}\"\n"), listens)
+    } else {
+        (String::new(), String::new())
+    };
     let (entry_link, exit_link) = if direct {
         (
-            format!("tunnel_connect = \"{tunnel_addr}\"\nlanes = {lanes}\n"),
-            format!("tunnel_listen = \"{bind}\"\n"),
+            format!("tunnel_connect = \"{tunnel_addr}\"\nlanes = {lanes}\n{dials_peer_ip}"),
+            format!("tunnel_listen = \"{bind}\"\n{listens_peer_ip}"),
         )
     } else {
         (
-            format!("tunnel_listen = \"{bind}\"\n"),
-            format!("tunnel_connect = \"{tunnel_addr}\"\nlanes = {lanes}\n"),
+            format!("tunnel_listen = \"{bind}\"\n{listens_peer_ip}"),
+            format!("tunnel_connect = \"{tunnel_addr}\"\nlanes = {lanes}\n{dials_peer_ip}"),
         )
     };
 
@@ -653,6 +732,7 @@ fn init(args: &InitArgs) -> Result<()> {
     println!("peer_public = \"{}\"", b64(&x_pub));
     print!("{}", common(&entry_link));
     print!("{fwd_toml}");
+    print!("{ovpn_toml}");
     if proxy.is_some() || dns.is_some() {
         print!("{}", proxy_block(proxy, split_iran, true));
     }

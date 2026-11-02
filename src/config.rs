@@ -118,6 +118,8 @@ pub struct Config {
     #[serde(default)]
     pub sync_ports: Vec<String>,
     pub sync_listen: Option<String>,
+
+    pub openvpn: Option<crate::openvpn::OpenVpn>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

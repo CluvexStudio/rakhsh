@@ -38,7 +38,7 @@ impl Mode {
     pub fn summary(self) -> &'static str {
         match self {
             Mode::Full => "AES-256-GCM on every record",
-            Mode::None => "NO data protection after the handshake (like BackPack's tcp): only for traffic that is already encrypted end to end",
+            Mode::None => "NO data protection after the handshake: only for traffic that is already encrypted end to end",
         }
     }
 

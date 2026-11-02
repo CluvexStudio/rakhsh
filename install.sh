@@ -175,7 +175,7 @@ create_tunnel(){
 
   printf "\n  Data protection ${GRY}(what the tunnel does to your bytes once connected — both ends get the same setting):${R}\n"
   printf "    ${CYN}1${R}) ${B}full${R}  ${GRY}AES-256-GCM on every byte ${GRN}(recommended)${R}\n"
-  printf "    ${CYN}2${R}) ${B}none${R}  ${GRY}no protection, like BackPack's tcp — fastest; only if your traffic is already encrypted end to end${R}\n"
+  printf "    ${CYN}2${R}) ${B}none${R}  ${GRY}no protection after the handshake — fastest; only if your traffic is already encrypted end to end${R}\n"
   ask "choice" 1 e
   case "$e" in 2) enc=none;; *) enc=full;; esac
   case "$enc" in
