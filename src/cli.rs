@@ -340,6 +340,7 @@ pub async fn run() -> Result<()> {
                 for line in dgram::describe(&cfg) {
                     println!("{line}");
                 }
+                dgram::validate(&cfg)?;
             } else if cfg.role == "entry" || cfg.role == "exit" {
                 for line in links::describe(&cfg)? {
                     println!("{line}");
@@ -694,6 +695,7 @@ fn init(args: &InitArgs) -> Result<()> {
         }
     }
 
+    let datagram = carrier.starts_with("shabdiz-");
     let raw_peer = matches!(
         carrier,
         "faketcp" | "l2tcp" | "icmp" | "spoof" | "shabdiz-gre" | "shabdiz-l2"
@@ -752,6 +754,10 @@ fn init(args: &InitArgs) -> Result<()> {
     println!("static_secret = \"{}\"", b64(&x_priv));
     println!("peer_public = \"{}\"", b64(&e_pub));
     print!("{}", common(&exit_link));
+    if datagram {
+        print!("{fwd_toml}");
+        print!("{ovpn_toml}");
+    }
     print!("{exit_links}");
     Ok(())
 }

@@ -113,6 +113,81 @@ fn init_writes_a_whole_openvpn_tunnel_that_checks_out() {
 }
 
 #[test]
+fn a_datagram_carrier_puts_the_udp_forward_on_both_ends() {
+    let (ok, said) = rakhsh(&[
+        "init",
+        "--tunnel-addr",
+        "198.51.100.7:7030",
+        "--peer-ip",
+        "203.0.113.9",
+        "--carrier",
+        "shabdiz-gre",
+        "--openvpn",
+        "udp:1194",
+    ]);
+    assert!(ok, "{said}");
+    let halves: Vec<&str> = said.split("##########").collect();
+    assert_eq!(halves.len(), 5, "{said}");
+
+    for (name, body) in [("entry", halves[2]), ("exit", halves[4])] {
+        assert!(
+            body.contains("udp = true"),
+            "{name} needs the udp forward: a datagram carrier reads it on both ends\n{body}"
+        );
+        assert!(body.contains("[openvpn]"), "{name} keeps the section too\n{body}");
+    }
+
+    let (ok, said) = rakhsh(&[
+        "init",
+        "--tunnel-addr",
+        "198.51.100.7:443",
+        "--carrier",
+        "wss",
+        "--forward",
+        "0.0.0.0:443=127.0.0.1:8443",
+    ]);
+    assert!(ok, "{said}");
+    let halves: Vec<&str> = said.split("##########").collect();
+    assert!(halves[2].contains("[[forward]]"), "the entry forwards");
+    assert!(
+        !halves[4].contains("[[forward]]"),
+        "a stream carrier keeps forwards on the entry only:\n{}",
+        halves[4]
+    );
+}
+
+#[test]
+fn check_refuses_a_datagram_config_that_run_would_refuse() {
+    let base = "carrier = \"shabdiz-gre\"\npeer_ip = \"203.0.113.9\"\n";
+    let fwd = "\n[[forward]]\nlisten = \"0.0.0.0:1194\"\ntarget = \"127.0.0.1:1194\"\nudp = true\n";
+
+    let no_forward = config(base);
+    let (ok, said) = rakhsh(&["check", "-c", &no_forward.display().to_string()]);
+    assert!(!ok, "a datagram carrier with no udp forward cannot run: {said}");
+    assert!(said.contains("udp = true"), "the error names the fix: {said}");
+
+    let tcp_forward = config(&format!(
+        "{base}\n[[forward]]\nlisten = \"0.0.0.0:1194\"\ntarget = \"127.0.0.1:1194\"\n"
+    ));
+    let (ok, _) = rakhsh(&["check", "-c", &tcp_forward.display().to_string()]);
+    assert!(!ok, "a stream forward does not satisfy a datagram carrier");
+
+    let two = config(&format!("{base}{fwd}{fwd}"));
+    let (ok, said) = rakhsh(&["check", "-c", &two.display().to_string()]);
+    assert!(!ok, "two udp forwards is one too many: {said}");
+
+    let no_peer = config(&format!("carrier = \"shabdiz-gre\"\n{fwd}"));
+    let (ok, said) = rakhsh(&["check", "-c", &no_peer.display().to_string()]);
+    assert!(!ok, "a raw carrier with no peer address cannot run: {said}");
+    assert!(said.contains("peer_ip"), "the error names the fix: {said}");
+
+    let whole = config(&format!("{base}{fwd}"));
+    let (ok, said) = rakhsh(&["check", "-c", &whole.display().to_string()]);
+    assert!(ok, "a complete datagram config passes: {said}");
+    assert!(said.contains("carries udp 0.0.0.0:1194 -> 127.0.0.1:1194"), "{said}");
+}
+
+#[test]
 fn the_openvpn_command_needs_the_section() {
     let path = config("");
     let (ok, said) = rakhsh(&["openvpn", "-c", &path.display().to_string()]);

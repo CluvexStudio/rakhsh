@@ -106,6 +106,17 @@ pub fn describe(cfg: &Config) -> Vec<String> {
     out
 }
 
+pub fn validate(cfg: &Config) -> Result<()> {
+    let Some(kind) = cfg.carrier.as_deref().and_then(kind_of) else {
+        return Ok(());
+    };
+    one_udp_forward(cfg)?;
+    if matches!(kind, Kind::Gre | Kind::L2) {
+        peer_addr(cfg, cfg.carrier.as_deref().unwrap_or("shabdiz"))?;
+    }
+    Ok(())
+}
+
 pub async fn run(cfg: Config) -> Result<()> {
     let kind = cfg
         .carrier
