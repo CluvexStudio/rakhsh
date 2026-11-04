@@ -236,6 +236,11 @@ async fn serve_once(
     };
 
     let handle = Arc::new(handle);
+    let probe = {
+        let handle = handle.clone();
+        let openvpn = cfg.openvpn.clone();
+        tokio::spawn(async move { announce_path_mtu(handle, openvpn).await })
+    };
     let report = {
         let handle = handle.clone();
         let carrier = carrier.clone();
@@ -247,8 +252,30 @@ async fn serve_once(
         exit_bridge(handle.clone(), fwd.1).await
     };
     report.abort();
+    probe.abort();
     info!("shabdiz {label} session closed: {:?}", handle.snapshot());
     res
+}
+
+async fn announce_path_mtu(handle: Arc<Handle>, openvpn: Option<crate::openvpn::OpenVpn>) {
+    let settled = handle.mtu_settled().await;
+    let assumed = handle.mtu().assumed();
+    if settled >= assumed {
+        info!("shabdiz: the path carries the full {assumed}-byte payload (probed)");
+        return;
+    }
+    warn!(
+        "shabdiz: the path carries {settled} bytes, not the {assumed} this carrier assumes \
+         (probed) — large datagrams would have been lost"
+    );
+    if let Some(ov) = openvpn {
+        let was = assumed.saturating_sub(ov.overhead_bytes());
+        let now = settled.saturating_sub(ov.overhead_bytes());
+        warn!(
+            "openvpn: set tun-mtu {now} on both ends, not the {was} derived from the assumed \
+             path, and mssfix {now} mtu with it"
+        );
+    }
 }
 
 fn apply_pacing(cfg: &Config, c: &Arc<dyn Carrier>) {

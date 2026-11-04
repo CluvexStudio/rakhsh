@@ -1,6 +1,6 @@
 use crate::{
-    config, dgram, engine, entry, exit, fleet, limits, links, noise, openvpn, raw, resume, status,
-    xui,
+    config, dgram, doctor, engine, entry, exit, fleet, limits, links, noise, openvpn, raw,
+    resume, status, xui,
 };
 use anyhow::{bail, Context, Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
@@ -123,6 +123,24 @@ enum Cmd {
     Openvpn {
         #[arg(short, long)]
         config: PathBuf,
+    },
+    Doctor {
+        #[arg(short, long)]
+        config: PathBuf,
+        #[arg(long, default_value_t = false)]
+        serve: bool,
+        #[arg(long)]
+        peer: Option<String>,
+        #[arg(long, default_value_t = doctor::PORT)]
+        port: u16,
+        #[arg(long, default_value_t = 8)]
+        seconds: u64,
+        #[arg(long = "carrier")]
+        carriers: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        protocols: bool,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
     },
     Quota {
         #[arg(short, long)]
@@ -369,6 +387,71 @@ pub async fn run() -> Result<()> {
             let cfg = config::Config::load(&config)?;
             openvpn::validate(&cfg)?;
             print!("{}", openvpn::directives(&cfg)?);
+        }
+        Cmd::Doctor {
+            config,
+            serve,
+            peer,
+            port,
+            seconds,
+            carriers,
+            protocols,
+            out,
+        } => {
+            let cfg = config::Config::load(&config)?;
+            match (serve, peer.as_deref()) {
+                (true, None) => doctor::serve(&cfg, port).await?,
+                (false, Some(peer)) => {
+                    let (host, control) = doctor::parse_peer(peer, port)?;
+                    let plan = doctor::Plan::new(&carriers, seconds, protocols)?;
+                    println!(
+                        "measuring {} carrier(s) against {host}, up to {}s each — about {}s in all",
+                        plan.carriers.len(),
+                        seconds,
+                        plan.budget().as_secs()
+                    );
+                    let needs = plan.privileged();
+                    if !needs.is_empty() {
+                        println!(
+                            "  note: {} forge their own packets, so both ends need CAP_NET_RAW",
+                            needs.join(", ")
+                        );
+                    }
+                    println!("{}", doctor::HEADER);
+                    let report = doctor::run(&cfg, &host, control, plan).await?;
+                    let good = report.ordered();
+                    println!();
+                    if good.is_empty() {
+                        println!("nothing held on this path");
+                    } else {
+                        println!(
+                            "{} of {} carrier(s) held; fastest was {} at {:.1} Mbit/s",
+                            good.len(),
+                            report.verdicts.len(),
+                            good[0].carrier,
+                            good[0].mbit
+                        );
+                    }
+                    let text = report.config(&host, control, links::dialing(&cfg));
+                    match out {
+                        Some(path) => {
+                            write_private(&path, &text)?;
+                            println!("wrote {} — the links in measured order", path.display());
+                        }
+                        None => {
+                            println!();
+                            print!("{text}");
+                        }
+                    }
+                }
+                (true, Some(_)) => {
+                    bail!("--serve waits for a peer; --peer drives the tests. Pick one")
+                }
+                (false, None) => bail!(
+                    "give --serve on one host and --peer <that host> on the other, \
+                     each with its half of a config pair from `rakhsh init`"
+                ),
+            }
         }
         Cmd::Status {
             config,

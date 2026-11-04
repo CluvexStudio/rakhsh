@@ -102,13 +102,13 @@ fn init_writes_a_whole_openvpn_tunnel_that_checks_out() {
     assert!(ok, "{said}");
     assert!(said.contains("forward udp 0.0.0.0:1194 -> 127.0.0.1:1194"), "{said}");
     assert!(said.contains("openvpn: udp on 0.0.0.0:1194"), "{said}");
-    assert!(said.contains("tun-mtu 1403"), "the mtu arithmetic is shown: {said}");
+    assert!(said.contains("tun-mtu 1399"), "the mtu arithmetic is shown: {said}");
 
     let (ok, said) = rakhsh(&["openvpn", "-c", &entry.display().to_string()]);
     assert!(ok, "the openvpn command runs: {said}");
     assert!(said.contains("proto udp"), "{said}");
-    assert!(said.contains("tun-mtu 1403"), "{said}");
-    assert!(said.contains("mssfix 1403 mtu"), "{said}");
+    assert!(said.contains("tun-mtu 1399"), "{said}");
+    assert!(said.contains("mssfix 1399 mtu"), "{said}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

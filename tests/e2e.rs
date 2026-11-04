@@ -80,6 +80,32 @@ fn socks_connect(socks: u16, target: u16) -> TcpStream {
     s
 }
 
+fn lanes_up(bin: &str, socket: &str, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        let out = Command::new(bin)
+            .args(["status", "--socket", socket, "--json"])
+            .output();
+        if let Ok(out) = out {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if let Some(rest) = text.split("\"lanes_up\":").nth(1) {
+                let n: u32 = rest
+                    .trim_start()
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0);
+                if n > 0 {
+                    return true;
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
 fn run(bin: &str, args: &[&str]) -> String {
     let out = Command::new(bin).args(args).output().expect("the binary runs");
     assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
@@ -115,8 +141,8 @@ fn a_tunnel_carries_traffic_end_to_end() {
     let entry = dir.join("entry.toml");
     let exit = dir.join("exit.toml");
     let sock = |name: &str| format!("control_socket = \"{}\"\n", dir.join(name).display());
-    std::fs::write(&entry, parts[2].trim_start().to_string() + &sock("entry.sock")).unwrap();
-    std::fs::write(&exit, parts[4].trim_start().to_string() + &sock("exit.sock")).unwrap();
+    std::fs::write(&entry, sock("entry.sock") + parts[2].trim_start()).unwrap();
+    std::fs::write(&exit, sock("exit.sock") + parts[4].trim_start()).unwrap();
 
     for file in [&entry, &exit] {
         let said = run(bin, &["check", "-c", &file.display().to_string()]);
@@ -146,6 +172,14 @@ fn a_tunnel_carries_traffic_end_to_end() {
     assert!(
         wait_for(socks, Duration::from_secs(20)),
         "the near side offers a proxy on {socks}; it said:\n{}",
+        near.complaint()
+    );
+
+    let status = dir.join("entry.sock").display().to_string();
+    assert!(
+        lanes_up(bin, &status, Duration::from_secs(20)),
+        "the proxy port opens before the lanes do, so wait for a lane before using it; \
+         the near side said:\n{}",
         near.complaint()
     );
 

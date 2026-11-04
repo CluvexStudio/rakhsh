@@ -50,9 +50,17 @@ fn a_spec_that_is_not_a_proto_or_a_port_is_refused() {
 #[test]
 fn the_overhead_is_the_sum_of_what_openvpn_adds() {
     let aead = OpenVpn::parse_spec("udp:1194").unwrap();
-    assert_eq!(aead.overhead_bytes(), 1 + 3 + 4 + 16);
+    assert_eq!(
+        aead.overhead_bytes(),
+        1 + 3 + 8 + 16,
+        "openvpn 2.7 negotiates the aead epoch format: 8 bytes of epoch and counter, \
+         not the 4-byte packet id of 2.6 and earlier. Measured on a live tunnel"
+    );
 
-    let no_peer_id = OpenVpn::parse_spec("udp:1194/no-peer-id").unwrap();
+    let classic = OpenVpn::parse_spec("udp:1194/no-epoch").unwrap();
+    assert_eq!(classic.overhead_bytes(), 1 + 3 + 4 + 16, "openvpn 2.6 and earlier");
+
+    let no_peer_id = OpenVpn::parse_spec("udp:1194/no-epoch/no-peer-id").unwrap();
     assert_eq!(no_peer_id.overhead_bytes(), 1 + 4 + 16);
 
     let tap = OpenVpn::parse_spec("udp:1194/tap").unwrap();
@@ -62,7 +70,13 @@ fn the_overhead_is_the_sum_of_what_openvpn_adds() {
     assert_eq!(compressed.overhead_bytes(), aead.overhead_bytes() + 1);
 
     let cbc = OpenVpn::parse_spec("udp:1194/cbc-sha256").unwrap();
-    assert_eq!(cbc.overhead_bytes(), 1 + 3 + 32 + 16 + 4 + 16);
+    assert_eq!(
+        cbc.overhead_bytes(),
+        1 + 3 + 32 + 16 + 4 + 16,
+        "the epoch format is aead only, so a cbc cipher keeps the 4-byte packet id"
+    );
+    let cbc_epoch = OpenVpn::parse_spec("udp:1194/cbc-sha256/no-epoch").unwrap();
+    assert_eq!(cbc.overhead_bytes(), cbc_epoch.overhead_bytes());
 
     let explicit = OpenVpn::parse_spec("udp:1194+41").unwrap();
     assert_eq!(explicit.overhead_bytes(), 41);
@@ -80,8 +94,8 @@ fn the_tun_mtu_is_what_the_carrier_carries_minus_what_openvpn_adds() {
         let c = cfg(carrier, "");
         let p = plan(&c, &ov);
         assert_eq!(p.carried, Some(carried), "{carrier}");
-        assert_eq!(p.tun_mtu, Some(carried - 24), "{carrier}");
-        assert_eq!(p.mss(), Some(carried - 24 - 40), "{carrier}");
+        assert_eq!(p.tun_mtu, Some(carried - 28), "{carrier}");
+        assert_eq!(p.mss(), Some(carried - 28 - 40), "{carrier}");
         assert!(p.datagram, "{carrier} is a datagram carrier");
     }
 }
@@ -144,6 +158,10 @@ fn describe_warns_when_udp_rides_a_reliable_carrier() {
     let said = describe(&c).join("\n");
     assert!(said.contains("WARNING"), "{said}");
     assert!(said.contains("shabdiz-"), "it names the fix: {said}");
+    assert!(
+        said.contains("max-packet-size"),
+        "check must mention the control-channel bound: {said}"
+    );
 }
 
 #[test]
@@ -170,8 +188,13 @@ fn the_directives_carry_the_computed_mtu_to_both_ends() {
             .filter(|l| l.trim() == want)
             .count()
     };
-    assert_eq!(directive("tun-mtu 1403"), 2, "once per end: {text}");
-    assert_eq!(directive("mssfix 1403 mtu"), 2, "once per end: {text}");
+    assert_eq!(directive("tun-mtu 1399"), 2, "once per end: {text}");
+    assert_eq!(directive("mssfix 1399 mtu"), 2, "once per end: {text}");
+    assert_eq!(
+        directive("max-packet-size 1427"),
+        2,
+        "the control channel needs bounding too, or a small path never handshakes: {text}"
+    );
     assert!(text.contains("proto udp"), "{text}");
     assert!(text.contains("remote <the entry's public address> 1194"), "{text}");
     assert!(text.contains("ping -M do"), "it says how to verify: {text}");
@@ -186,6 +209,10 @@ fn the_directives_for_tcp_mode_set_no_mtu() {
     );
     let text = directives(&c).expect("directives for a complete config");
     assert!(!text.contains("tun-mtu"), "{text}");
+    assert!(
+        !text.contains("max-packet-size"),
+        "a stream carrier needs no size bound: {text}"
+    );
     assert!(text.contains("proto tcp-server"), "{text}");
     assert!(text.contains("proto tcp-client"), "{text}");
 }
@@ -200,7 +227,7 @@ fn a_config_without_the_section_is_silent_and_valid() {
 
 #[test]
 fn the_generated_toml_reads_back_as_the_same_settings() {
-    let ov = OpenVpn::parse_spec("udp:1195/tap/cbc-sha512").unwrap();
+    let ov = OpenVpn::parse_spec("udp:1195/tap/cbc-sha512/no-epoch").unwrap();
     let text = format!(
         "role = \"entry\"\n\
          token = \"ERERERERERERERERERERERERERERERERERERERERERE=\"\n\
@@ -222,6 +249,7 @@ fn the_generated_toml_reads_back_as_the_same_settings() {
     assert_eq!(back.port, 1195);
     assert_eq!(back.device, Device::Tap);
     assert_eq!(back.crypto, Crypto::CbcSha512);
+    assert!(!back.epoch, "the epoch setting survives the round trip");
     assert_eq!(back.overhead_bytes(), ov.overhead_bytes());
     validate(&c).expect("the generated pair is self-consistent");
 }

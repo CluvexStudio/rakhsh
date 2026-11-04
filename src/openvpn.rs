@@ -8,12 +8,14 @@ pub const DEFAULT_PORT: u16 = 1194;
 const OPCODE: usize = 1;
 const PEER_ID: usize = 3;
 const PACKET_ID: usize = 4;
+const EPOCH_ID: usize = 8;
 const AEAD_TAG: usize = 16;
 const AES_IV: usize = 16;
 const AES_BLOCK: usize = 16;
 const ETH_HDR: usize = 14;
 const IPV4_TCP: usize = 40;
 const COMPRESS_BYTE: usize = 1;
+const CONTROL_DEFAULT: usize = 1250;
 
 const GRE_CARRIED: usize = 1427;
 const L2_CARRIED: usize = 1405;
@@ -61,6 +63,8 @@ pub struct OpenVpn {
     pub peer_id: bool,
     pub overhead: Option<usize>,
     pub listen: Option<String>,
+    #[serde(default = "default_epoch")]
+    pub epoch: bool,
 }
 
 fn default_proto() -> Proto {
@@ -83,6 +87,10 @@ fn default_peer_id() -> bool {
     true
 }
 
+fn default_epoch() -> bool {
+    true
+}
+
 impl Default for OpenVpn {
     fn default() -> OpenVpn {
         OpenVpn {
@@ -95,6 +103,7 @@ impl Default for OpenVpn {
             peer_id: default_peer_id(),
             overhead: None,
             listen: None,
+            epoch: default_epoch(),
         }
     }
 }
@@ -186,13 +195,18 @@ impl Crypto {
         }
     }
 
-    fn per_packet(self) -> usize {
+    fn per_packet(self, epoch: bool) -> usize {
         match self {
+            Crypto::Aead if epoch => EPOCH_ID + AEAD_TAG,
             Crypto::Aead => PACKET_ID + AEAD_TAG,
             Crypto::CbcSha1 => 20 + AES_IV + PACKET_ID + AES_BLOCK,
             Crypto::CbcSha256 => 32 + AES_IV + PACKET_ID + AES_BLOCK,
             Crypto::CbcSha512 => 64 + AES_IV + PACKET_ID + AES_BLOCK,
         }
+    }
+
+    fn aead(self) -> bool {
+        matches!(self, Crypto::Aead)
     }
 }
 
@@ -203,7 +217,7 @@ impl OpenVpn {
         }
         OPCODE
             + if self.peer_id { PEER_ID } else { 0 }
-            + self.crypto.per_packet()
+            + self.crypto.per_packet(self.epoch && self.crypto.aead())
             + self.device.framing()
             + if self.compress { COMPRESS_BYTE } else { 0 }
     }
@@ -256,6 +270,7 @@ impl OpenVpn {
                 "tun" | "tap" => ov.device = Device::parse(opt)?,
                 "compress" | "comp" => ov.compress = true,
                 "no-peer-id" => ov.peer_id = false,
+                "no-epoch" => ov.epoch = false,
                 other => ov.crypto = Crypto::parse(other)?,
             }
         }
@@ -340,6 +355,9 @@ pub fn config_toml(ov: &OpenVpn) -> String {
     if !ov.peer_id {
         s.push_str("peer_id = false\n");
     }
+    if !ov.epoch {
+        s.push_str("epoch = false\n");
+    }
     if let Some(n) = ov.overhead {
         s.push_str(&format!("overhead = {n}\n"));
     }
@@ -412,6 +430,10 @@ pub fn describe(cfg: &Config) -> Vec<String> {
                     "  and mssfix {tun_mtu} mtu (openvpn 2.6+), which announces an mss of {mss}"
                 ));
             }
+            out.push(format!(
+                "  and max-packet-size {carried}, which bounds openvpn's control channel too — \
+                 without it a path under {CONTROL_DEFAULT} bytes never finishes its handshake"
+            ));
             if !p.datagram {
                 out.push(format!(
                     "  WARNING: carrier {:?} is a reliable carrier. A udp payload inside it is \
@@ -462,9 +484,10 @@ pub fn directives(cfg: &Config) -> Result<String> {
     s.push_str(&format!("{}\n", p.proto.server_directive()));
     s.push_str(&format!("port {}\n", ov.port));
     s.push_str(&format!("dev {}\n", p.device.as_str()));
-    if let Some(mtu) = p.tun_mtu {
+    if let (Some(mtu), Some(carried)) = (p.tun_mtu, p.carried) {
         s.push_str(&format!("tun-mtu {mtu}\n"));
         s.push_str(&format!("mssfix {mtu} mtu\n"));
+        s.push_str(&format!("max-packet-size {carried}\n"));
     }
     s.push('\n');
 
@@ -479,9 +502,10 @@ pub fn directives(cfg: &Config) -> Result<String> {
     };
     s.push_str(&format!("remote {host} {port}\n"));
     s.push_str(&format!("dev {}\n", p.device.as_str()));
-    if let Some(mtu) = p.tun_mtu {
+    if let (Some(mtu), Some(carried)) = (p.tun_mtu, p.carried) {
         s.push_str(&format!("tun-mtu {mtu}\n"));
         s.push_str(&format!("mssfix {mtu} mtu\n"));
+        s.push_str(&format!("max-packet-size {carried}\n"));
     }
     s.push('\n');
 
@@ -489,8 +513,11 @@ pub fn directives(cfg: &Config) -> Result<String> {
         s.push_str(&format!(
             "# this tunnel carries a udp payload of {carried} bytes.\n\
              # openvpn adds {} per packet for {}, device {}, so tun-mtu is {mtu}.\n\
+             # max-packet-size bounds the control channel as well: openvpn defaults it to\n\
+             # {CONTROL_DEFAULT}, and on a path that carries less the tls handshake never\n\
+             # finishes, with nothing in the log to say why.\n\
              # on openvpn 2.5 and older, replace `mssfix {mtu} mtu` with `fragment {mtu}`\n\
-             # and keep tun-mtu as given.\n\
+             # and `max-packet-size {carried}` with `link-mtu {carried}`.\n\
              # verify it: ping -M do -s {} <the other end inside the tunnel>\n",
             p.overhead,
             ov.crypto.label(),

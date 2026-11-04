@@ -2,6 +2,7 @@ mod carrier;
 pub mod cli;
 mod config;
 mod dgram;
+mod doctor;
 mod dns;
 mod engine;
 mod entry;
