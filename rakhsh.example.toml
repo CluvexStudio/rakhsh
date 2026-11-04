@@ -117,8 +117,10 @@ crypto = "aead"                 # aead (default) · cbc-sha1 · cbc-sha256 · cb
 server = "127.0.0.1:1194"       # where the OpenVPN server is, from the exit
 compress = false                # adds one byte of framing per packet
 peer_id = true                  # OpenVPN 2.4+ negotiates a 3-byte peer id
+epoch = true                    # OpenVPN 2.7's AEAD epoch format: 8 bytes, not 4.
+                                # Set false for 2.6 and earlier.
 # listen = "0.0.0.0:1194"       # defaults to 0.0.0.0:<port>
-# overhead = 24                 # override the computed per-packet overhead
+# overhead = 28                 # override the computed per-packet overhead
 
 # ─── more peers: one entry per node on the other side ──────────────────────
 [[peer]]
