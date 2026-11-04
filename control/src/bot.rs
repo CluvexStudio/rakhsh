@@ -6,7 +6,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use teloxide::payloads::EditMessageTextSetters;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
+use teloxide::types::{
+    BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode,
+};
 
 use crate::{fetch, Shared, Telegram};
 
@@ -28,6 +30,17 @@ pub fn spawn(cfg: &crate::Config, state: Shared) {
 
     let live = Arc::new(AtomicU64::new(0));
     tokio::spawn(async move {
+        // So Telegram's own "/" menu lists them.
+        let _ = bot
+            .set_my_commands(vec![
+                BotCommand::new("status", "live fleet status"),
+                BotCommand::new("nodes", "the node list"),
+                BotCommand::new("node", "detail for one node: /node <name>"),
+                BotCommand::new("logs", "live logs: /logs <name>"),
+                BotCommand::new("speedtest", "in-tunnel speed test"),
+                BotCommand::new("help", "what this bot can do"),
+            ])
+            .await;
         let handler = dptree::entry()
             .branch(Update::filter_message().endpoint(on_message))
             .branch(Update::filter_callback_query().endpoint(on_callback));
@@ -61,6 +74,7 @@ async fn on_message(
         .trim_start_matches('/')
         .to_lowercase();
     let cmd = cmd.split('@').next().unwrap_or("");
+    let arg = text.split_whitespace().nth(1).unwrap_or("").to_string();
 
     let gen = live.fetch_add(1, Ordering::SeqCst) + 1;
 
@@ -88,6 +102,56 @@ async fn on_message(
                 .parse_mode(ParseMode::Html)
                 .reply_markup(kb)
                 .await?;
+        }
+        // /node, /logs and /speedtest reach the same views the buttons do, for
+        // anyone who would rather type than tap.
+        "node" => {
+            let (t, kb) = if arg.is_empty() {
+                nodes_view(&state)
+            } else {
+                node_view(&state, &arg)
+            };
+            bot.send_message(msg.chat.id, t)
+                .parse_mode(ParseMode::Html)
+                .reply_markup(kb)
+                .await?;
+        }
+        "logs" => {
+            if arg.is_empty() {
+                let (t, kb) = nodes_view(&state);
+                bot.send_message(msg.chat.id, t)
+                    .parse_mode(ParseMode::Html)
+                    .reply_markup(kb)
+                    .await?;
+            } else {
+                let (t, kb) = logs_view(&state, &arg, 0, true).await;
+                let sent = bot
+                    .send_message(msg.chat.id, t)
+                    .parse_mode(ParseMode::Html)
+                    .reply_markup(kb)
+                    .await?;
+                spawn_live(
+                    bot,
+                    msg.chat.id,
+                    sent.id,
+                    state,
+                    live,
+                    gen,
+                    LiveMode::Logs(arg),
+                );
+            }
+        }
+        "speedtest" | "speed" => {
+            let sent = bot
+                .send_message(
+                    msg.chat.id,
+                    "⏳ <b>in-tunnel speed test…</b>\n<i>flooding the tunnel both ways (~8s)</i>",
+                )
+                .parse_mode(ParseMode::Html)
+                .reply_markup(back_only_kb())
+                .await?;
+            let t = speed_text(&state).await;
+            edit(&bot, msg.chat.id, sent.id, t, speed_kb()).await;
         }
         "help" => {
             let (t, kb) = help_view();
@@ -306,9 +370,15 @@ fn home_view(state: &Shared) -> (String, InlineKeyboardMarkup) {
 }
 
 fn help_view() -> (String, InlineKeyboardMarkup) {
-    let text = "<b>rakhsh Control Center</b>\n\nTap the buttons to get around, or use:\n\
-        • /status — live fleet status\n• /nodes — the node list\n• /start — the home menu\n\n\
-        From a node you can run an in-tunnel <b>speed test</b> (↓ and ↑), watch <b>live logs</b>, and <b>restart</b> it."
+    let text = "<b>rakhsh Control Center</b>\n\nTap the buttons to get around, or type:\n\
+        • /status — live fleet status\n\
+        • /nodes — the node list\n\
+        • /node &lt;name&gt; — one node in full\n\
+        • /logs &lt;name&gt; — live logs\n\
+        • /speedtest — in-tunnel ↓ and ↑\n\
+        • /start — the home menu\n\n\
+        From a node you can also <b>restart</b> it. Alerts arrive on their own when a node \
+        goes offline, loses packets, saturates its CPU or fills a quota."
         .to_string();
     let kb = InlineKeyboardMarkup::new(vec![vec![btn("🏠 Home", "home")]]);
     (text, kb)

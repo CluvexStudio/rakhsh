@@ -105,12 +105,16 @@ tool used during an internet shutdown.
 
 With `[telegram]` set, the bot answers (only in the configured chat):
 
-- `/status` — a fleet summary
+- `/status` — a fleet summary that refreshes itself in place
 - `/nodes` — the node list
 - `/node <name>` — full details for one node
-- `/logs <name>` — recent warnings for a node
-- `/speedtest <name>` — an in-tunnel speed test
-- `/help`
+- `/logs <name>` — live logs for a node, refreshing in place
+- `/speedtest` — an in-tunnel speed test, run from the entry
+- `/help`, and anything else opens the home menu
+
+Everything is reachable by tapping too: home → status / nodes / speed test, and a node → logs,
+speed test and **Restart** (which asks first). Stop, start and config backups stay in the panel —
+the bot never leaves a node down.
 
 And it sends **alerts** on its own when a node goes offline, a lane's loss or the system CPU crosses the
 threshold, or a quota is nearly full — and once more when it recovers (debounced, not repeated).
