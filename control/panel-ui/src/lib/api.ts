@@ -102,11 +102,11 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
   return { Authorization: "Bearer " + TOKEN, ...(extra || {}) }
 }
 
-export async function login(password: string): Promise<boolean> {
+export async function login(username: string, password: string): Promise<boolean> {
   const r = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   })
   if (!r.ok) return false
   const j = await r.json()

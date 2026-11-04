@@ -1,5 +1,6 @@
 # rakhsh Control Center
 listen = "0.0.0.0:8443"
+username = "admin"              # panel login
 password = "change-me"          # panel password (empty = no auth; only behind a trusted network)
 # tls_cert = "/etc/rakhsh/panel.crt"   # your own PEM cert + key; omit for a self-signed pair
 # tls_key  = "/etc/rakhsh/panel.key"

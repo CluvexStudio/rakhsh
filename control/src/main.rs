@@ -43,6 +43,24 @@ enum Cmd {
     Init {
         #[arg(short, long, default_value = "control.toml")]
         config: String,
+        /// Defaults to a generated one.
+        #[arg(long)]
+        username: Option<String>,
+        /// Defaults to a generated one.
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long, default_value = "0.0.0.0:8443")]
+        listen: String,
+    },
+    Install {
+        #[arg(short, long, default_value = "/etc/rakhsh/control.toml")]
+        config: String,
+        #[arg(long, default_value = "rakhsh-control")]
+        name: String,
+    },
+    Uninstall {
+        #[arg(long, default_value = "rakhsh-control")]
+        name: String,
     },
 }
 
@@ -50,6 +68,8 @@ enum Cmd {
 struct Config {
     #[serde(default = "d_listen")]
     listen: String,
+    #[serde(default = "d_user")]
+    username: String,
     #[serde(default)]
     password: String,
     tls_cert: Option<String>,
@@ -85,6 +105,10 @@ fn d_listen() -> String {
     "0.0.0.0:8443".into()
 }
 
+fn d_user() -> String {
+    "admin".into()
+}
+
 #[derive(Deserialize, Clone)]
 pub struct Node {
     pub name: String,
@@ -117,14 +141,14 @@ async fn main() -> Result<()> {
         )
         .init();
     match Cli::parse().cmd {
-        Cmd::Init { config } => {
-            if std::path::Path::new(&config).exists() {
-                anyhow::bail!("{config} already exists");
-            }
-            std::fs::write(&config, SAMPLE).with_context(|| format!("writing {config}"))?;
-            println!("wrote {config} — edit it, then: rakhsh-control serve -c {config}");
-            Ok(())
-        }
+        Cmd::Init {
+            config,
+            username,
+            password,
+            listen,
+        } => init(&config, username.as_deref(), password.as_deref(), &listen),
+        Cmd::Install { config, name } => install_service(&config, &name),
+        Cmd::Uninstall { name } => uninstall_service(&name),
         Cmd::Serve { config } => serve(&config).await,
     }
 }
@@ -237,6 +261,8 @@ async fn manifest() -> impl IntoResponse {
 
 #[derive(Deserialize)]
 struct LoginReq {
+    #[serde(default)]
+    username: String,
     password: String,
 }
 
@@ -244,13 +270,15 @@ async fn login(
     State(s): State<Shared>,
     Json(r): Json<LoginReq>,
 ) -> Result<Json<Value>, StatusCode> {
-    if s.cfg.password.is_empty() || r.password == s.cfg.password {
-        let token = rand_hex();
-        s.tokens.lock().unwrap().insert(token.clone());
-        Ok(Json(json!({ "token": token })))
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
+    let open = s.cfg.password.is_empty();
+    let pair = ct_eq(&r.username, &s.cfg.username) && ct_eq(&r.password, &s.cfg.password);
+    if !open && !pair {
+        warn!("failed login for {:?}", r.username);
+        return Err(StatusCode::UNAUTHORIZED);
     }
+    let token = rand_hex();
+    s.tokens.lock().unwrap().insert(token.clone());
+    Ok(Json(json!({ "token": token })))
 }
 
 async fn status(State(s): State<Shared>, headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
@@ -440,8 +468,8 @@ async fn scheduler(state: Shared) {
     }
 }
 
-fn rand_hex() -> String {
-    let mut b = [0u8; 16];
+fn rand_bytes(n: usize) -> Vec<u8> {
+    let mut b = vec![0u8; n];
     use std::io::Read;
     if std::fs::File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(&mut b))
@@ -450,8 +478,136 @@ fn rand_hex() -> String {
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
-            .unwrap_or(1);
-        b[..16].copy_from_slice(&t.to_be_bytes());
+            .unwrap_or(1)
+            .to_be_bytes();
+        for (i, x) in b.iter_mut().enumerate() {
+            *x = t[i % t.len()] ^ (i as u8).wrapping_mul(31);
+        }
     }
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    b
 }
+
+fn rand_hex() -> String {
+    rand_bytes(16).iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// A password that survives being read aloud: no 0/O, 1/l/I.
+fn rand_pass(n: usize) -> String {
+    const ALPHA: &[u8] = b"abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789";
+    rand_bytes(n)
+        .iter()
+        .map(|x| ALPHA[*x as usize % ALPHA.len()] as char)
+        .collect()
+}
+
+/// Comparison that does not return early on the first wrong byte.
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
+}
+
+fn harden(path: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+fn init(config: &str, username: Option<&str>, password: Option<&str>, listen: &str) -> Result<()> {
+    if std::path::Path::new(config).exists() {
+        anyhow::bail!("{config} already exists — delete it first, or pass -c <other path>");
+    }
+    let user = username
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("rk{}", rand_pass(8)));
+    let pass = password
+        .map(str::to_string)
+        .unwrap_or_else(|| rand_pass(20));
+    let text = SAMPLE
+        .replace("listen = \"0.0.0.0:8443\"", &format!("listen = {listen:?}"))
+        .replace(
+            "username = \"admin\"              # panel login",
+            &format!("username = {user:?}   # panel login, generated"),
+        )
+        .replace(
+            "password = \"change-me\"          # panel password (empty = no auth; only behind a trusted network)",
+            &format!("password = {pass:?}   # generated; empty would mean no auth at all"),
+        );
+    if let Some(dir) = std::path::Path::new(config).parent() {
+        if !dir.as_os_str().is_empty() {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+    }
+    std::fs::write(config, &text).with_context(|| format!("writing {config}"))?;
+    harden(config);
+
+    let port = listen.rsplit(':').next().unwrap_or("8443");
+    let host = listen.rsplit_once(':').map(|(h, _)| h).unwrap_or("");
+    let url = match host {
+        "" | "0.0.0.0" | "[::]" | "::" => format!("https://<this-server>:{port}"),
+        h => format!("https://{h}:{port}"),
+    };
+    println!("wrote {config} (mode 600)\n");
+    println!("  panel      {url}");
+    println!("  username   {user}");
+    println!("  password   {pass}\n");
+    println!("Keep them safe. They are stored in {config}, which is mode 600.");
+    println!("Then:  rakhsh-control install -c {config}");
+    Ok(())
+}
+
+fn install_service(config: &str, name: &str) -> Result<()> {
+    use std::process::Command;
+    let exe = std::env::current_exe().context("finding current executable")?;
+    let cfg_abs = std::fs::canonicalize(config)
+        .with_context(|| format!("resolving config path {config} (run `init` first)"))?;
+    let unit_path = format!("/etc/systemd/system/{name}.service");
+    let unit = format!(
+        "[Unit]\n\
+Description=rakhsh control center ({name})\n\
+After=network-online.target\n\
+Wants=network-online.target\n\
+\n\
+[Service]\n\
+Type=simple\n\
+ExecStart={exe} serve -c {cfg}\n\
+Restart=always\n\
+RestartSec=2\n\
+LimitNOFILE=65536\n\
+AmbientCapabilities=CAP_NET_BIND_SERVICE\n\
+\n\
+[Install]\n\
+WantedBy=multi-user.target\n",
+        exe = exe.display(),
+        cfg = cfg_abs.display(),
+    );
+    std::fs::write(&unit_path, unit).with_context(|| format!("writing {unit_path} (need root)"))?;
+    Command::new("systemctl").arg("daemon-reload").status().ok();
+    let st = Command::new("systemctl")
+        .args(["enable", "--now", &format!("{name}.service")])
+        .status()
+        .context("systemctl enable --now")?;
+    if !st.success() {
+        anyhow::bail!("systemctl enable --now {name}.service failed");
+    }
+    println!("installed and started {name}.service ({unit_path})");
+    Ok(())
+}
+
+fn uninstall_service(name: &str) -> Result<()> {
+    use std::process::Command;
+    let svc = format!("{name}.service");
+    Command::new("systemctl")
+        .args(["disable", "--now", &svc])
+        .status()
+        .ok();
+    let _ = std::fs::remove_file(format!("/etc/systemd/system/{name}.service"));
+    Command::new("systemctl").arg("daemon-reload").status().ok();
+    println!("removed {svc}");
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/auth.rs"]
+mod auth_tests;

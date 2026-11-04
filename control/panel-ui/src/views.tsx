@@ -6,6 +6,8 @@ import {
   Clock,
   Cpu,
   Download,
+  Eye,
+  EyeOff,
   GitBranch,
   Globe,
   HardDrive,
@@ -33,7 +35,7 @@ import {
   speedtest,
   type SpeedResult,
 } from "@/lib/api"
-import { avg, bytes, clamp, dur, mbit, pctTone, rate, toneColor, trend, unit } from "@/lib/utils"
+import { avg, bytes, clamp, cn, dur, mbit, pctTone, rate, toneColor, trend, unit } from "@/lib/utils"
 import {
   Badge,
   Button,
@@ -890,17 +892,19 @@ export function Settings({ nodes, onToast }: { nodes: Node[]; onToast: (ok: bool
 }
 
 /* ====================== Login ====================== */
-export function Login({ onLogin }: { onLogin: (pw: string) => Promise<boolean> }) {
+export function Login({ onLogin }: { onLogin: (user: string, pw: string) => Promise<boolean> }) {
+  const [user, setUser] = React.useState("")
   const [pw, setPw] = React.useState("")
+  const [show, setShow] = React.useState(false)
   const [err, setErr] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setErr("")
-    const ok = await onLogin(pw).catch(() => false)
+    const ok = await onLogin(user, pw).catch(() => false)
     setBusy(false)
-    if (!ok) setErr("Wrong password, or the server is unreachable.")
+    if (!ok) setErr("Wrong username or password, or the server is unreachable.")
   }
   return (
     <div className="app-bg grid min-h-screen place-items-center p-4">
@@ -920,16 +924,44 @@ export function Login({ onLogin }: { onLogin: (pw: string) => Promise<boolean> }
           <CardBody className="p-5">
             <form onSubmit={submit} className="space-y-3">
               <label className="block font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                Panel password
+                Username
               </label>
               <input
-                type="password"
                 autoFocus
-                value={pw}
-                onChange={(e) => setPw(e.target.value)}
-                placeholder="••••••••"
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                autoComplete="username"
+                placeholder="admin"
                 className="nb-flat h-11 w-full bg-[var(--surface-2)] px-3 font-mono text-[14px] outline-none focus:ring-4 focus:ring-[var(--fill-yellow)]"
               />
+              <label className="block pt-1 font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+                Password
+              </label>
+              <div className="nb-flat flex h-11 items-stretch bg-[var(--surface-2)] focus-within:ring-4 focus-within:ring-[var(--fill-yellow)]">
+                <input
+                  type={show ? "text" : "password"}
+                  value={pw}
+                  onChange={(e) => setPw(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className="min-w-0 flex-1 bg-transparent px-3 font-mono text-[14px] outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow((v) => !v)}
+                  aria-label={show ? "Hide password" : "Show password"}
+                  title={show ? "Hide password" : "Show password"}
+                  className={cn(
+                    "grid w-11 shrink-0 place-items-center border-l-[3px] border-l-[var(--ink)]",
+                    "[&>svg]:size-[18px] [&>svg]:stroke-[2.5]",
+                    show
+                      ? "bg-[var(--fill-yellow)] text-[var(--on-fill)]"
+                      : "bg-[var(--surface)] hover:bg-[var(--fill-yellow)] hover:text-[var(--on-fill)]"
+                  )}
+                >
+                  {show ? <EyeOff /> : <Eye />}
+                </button>
+              </div>
               {err ? (
                 <div className="nb-flat bg-[var(--fill-red)] px-3 py-2 font-mono text-[11px] font-bold text-[#f8f4ec]">
                   {err}

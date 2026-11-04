@@ -36,13 +36,26 @@ read-only local socket.
 ## Setup
 
 ```
-rakhsh-control init -c control.toml     # writes a sample
-rakhsh-control serve -c control.toml    # the panel on https://<listen>
+rakhsh-control init -c control.toml     # config + a generated username and password
+rakhsh-control install -c control.toml  # run it as rakhsh-control.service
+rakhsh-control serve -c control.toml    # or serve it in the foreground
 ```
+
+`init` generates the login, writes it into the file at mode 600, and prints it once:
+
+```
+  panel      https://<this-server>:8443
+  username   rkaazaqpy4
+  password   tSNaATNRNnb77Ug64Smx
+```
+
+`--username`, `--password` and `--listen` override it. `sudo ./install.sh` → **Control panel**
+does the whole thing, shows the credentials again on later runs, and can roll the password.
 
 ```toml
 listen = "0.0.0.0:8443"
-password = "a-strong-password"      # panel login; empty = no auth (only behind a trusted network)
+username = "rkaazaqpy4"             # panel login (init generates one)
+password = "a-strong-password"      # empty = no auth (only behind a trusted network)
 # tls_cert = "/etc/rakhsh/panel.crt" # your own PEM cert + key; omit for a self-signed pair
 # tls_key  = "/etc/rakhsh/panel.key"
 refresh = 2                          # seconds between fleet refreshes

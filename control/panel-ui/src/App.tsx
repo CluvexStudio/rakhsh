@@ -27,8 +27,8 @@ export default function App() {
   if (fleet.needsLogin) {
     return (
       <Login
-        onLogin={async (pw) => {
-          const ok = await login(pw)
+        onLogin={async (user, pw) => {
+          const ok = await login(user, pw)
           if (ok) await fleet.refresh()
           return ok
         }}
