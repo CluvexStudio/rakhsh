@@ -1,0 +1,49 @@
+# Forged TCP packets — the ENTRY half.
+#
+# faketcp builds its own TCP-looking packets on a raw socket. There is no
+# socket and no handshake underneath, so the path sees a TCP flow that no
+# kernel on either side knows about, and QUIC on top of it recovers from loss.
+# Pairs with examples/raw-exit.toml.
+#
+#   rakhsh check      -c examples/raw-entry.toml      the port pair derived from the token
+#   rakhsh spoof-test --help                          which forged sources cross the path
+#
+# Needs root (CAP_NET_RAW).
+
+# Identity. Placeholders — see examples/entry.toml.
+role = "entry"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="
+static_secret = "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="
+peer_public = "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="
+
+carrier = "faketcp"
+tunnel_listen = "0.0.0.0:7000"
+
+# The exit's address. Required on both ends by every raw carrier.
+peer_ip = "203.0.113.9"
+
+# A raw carrier always runs one lane: each extra lane would be another port
+# pair over the same bottleneck, costing CPU and adding no throughput. FEC is
+# the lever instead.
+lanes = 1
+
+# What runs on top of the forged packets. The other end must match.
+reliability = "quic"
+
+# Forward error correction: for every 10 payload packets, 3 recovery packets.
+# Parity costs bandwidth on every packet, so measure the loss before turning it
+# on — it pays on a lossy path and not on a clean one. Both ends must agree.
+# fec_data = 10
+# fec_parity = 3
+
+# Forge a different source address, or rotate through several. `rakhsh
+# spoof-test` finds out which of them the path actually carries.
+# spoof_src_ip = "198.51.100.7"
+# spoof_src_pool = "198.51.100.8,198.51.100.9"
+# spoof_rotate_secs = 300
+
+control_socket = "/run/rakhsh-raw.sock"
+
+[[forward]]
+listen = "0.0.0.0:8443"
+target = "127.0.0.1:8443"

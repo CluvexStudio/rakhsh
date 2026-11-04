@@ -46,7 +46,20 @@ impl Pool {
     }
 }
 
+pub fn validate(cfg: &Config) -> Result<()> {
+    if let Some(l) = cfg.sync_listen.as_deref() {
+        if l.parse::<std::net::IpAddr>().is_err() {
+            anyhow::bail!(
+                "sync_listen = {l:?} must be a bare address with no port, because the port of \
+                 each pushed forward comes from the panel (sync_listen = \"0.0.0.0\")"
+            );
+        }
+    }
+    Ok(())
+}
+
 pub async fn run(cfg: Config) -> Result<()> {
+    validate(&cfg)?;
     let keys = Keys::from_cfg(&cfg)?;
     keys.mode.announce();
     let metrics = crate::status::init(&cfg, "entry");

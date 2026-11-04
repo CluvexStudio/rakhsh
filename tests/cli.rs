@@ -32,8 +32,14 @@ fn a_forward_without_a_target_is_refused_rather_than_duplicated() {
         "--forward",
         "0.0.0.0:8443:127.0.0.1:2096",
     ]);
-    assert!(!ok, "a forward spec with no '=' must not be accepted: {said}");
-    assert!(said.contains("listen=target"), "the error says the syntax: {said}");
+    assert!(
+        !ok,
+        "a forward spec with no '=' must not be accepted: {said}"
+    );
+    assert!(
+        said.contains("listen=target"),
+        "the error says the syntax: {said}"
+    );
 }
 
 #[test]
@@ -50,7 +56,10 @@ fn a_forward_spec_becomes_two_separate_keys() {
     assert!(ok, "init accepts listen=target: {said}");
     assert!(said.contains("listen = \"0.0.0.0:8443\""), "{said}");
     assert!(said.contains("target = \"127.0.0.1:2096\""), "{said}");
-    assert!(said.contains("udp = true"), "the /udp suffix survives: {said}");
+    assert!(
+        said.contains("udp = true"),
+        "the /udp suffix survives: {said}"
+    );
 }
 
 #[test]
@@ -61,8 +70,14 @@ fn check_reports_every_forward() {
     );
     let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
     assert!(ok, "the config is valid: {said}");
-    assert!(said.contains("forward tcp 0.0.0.0:8443 -> 127.0.0.1:2096"), "{said}");
-    assert!(said.contains("forward udp 0.0.0.0:51820 -> 127.0.0.1:51820"), "{said}");
+    assert!(
+        said.contains("forward tcp 0.0.0.0:8443 -> 127.0.0.1:2096"),
+        "{said}"
+    );
+    assert!(
+        said.contains("forward udp 0.0.0.0:51820 -> 127.0.0.1:51820"),
+        "{said}"
+    );
 }
 
 #[test]
@@ -100,9 +115,15 @@ fn init_writes_a_whole_openvpn_tunnel_that_checks_out() {
     let entry = dir.join("entry.toml");
     let (ok, said) = rakhsh(&["check", "-c", &entry.display().to_string()]);
     assert!(ok, "{said}");
-    assert!(said.contains("forward udp 0.0.0.0:1194 -> 127.0.0.1:1194"), "{said}");
+    assert!(
+        said.contains("forward udp 0.0.0.0:1194 -> 127.0.0.1:1194"),
+        "{said}"
+    );
     assert!(said.contains("openvpn: udp on 0.0.0.0:1194"), "{said}");
-    assert!(said.contains("tun-mtu 1399"), "the mtu arithmetic is shown: {said}");
+    assert!(
+        said.contains("tun-mtu 1399"),
+        "the mtu arithmetic is shown: {said}"
+    );
 
     let (ok, said) = rakhsh(&["openvpn", "-c", &entry.display().to_string()]);
     assert!(ok, "the openvpn command runs: {said}");
@@ -110,6 +131,49 @@ fn init_writes_a_whole_openvpn_tunnel_that_checks_out() {
     assert!(said.contains("tun-mtu 1399"), "{said}");
     assert!(said.contains("mssfix 1399 mtu"), "{said}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn init_writes_nothing_that_check_calls_inert() {
+    for (carrier, forward) in [
+        ("wss", "0.0.0.0:8443=127.0.0.1:8443"),
+        ("quic", "0.0.0.0:8443=127.0.0.1:8443"),
+        ("faketcp", "0.0.0.0:8443=127.0.0.1:8443"),
+        ("shabdiz-gre", "0.0.0.0:1194=127.0.0.1:1194/udp"),
+        ("shabdiz-udp", "0.0.0.0:1194=127.0.0.1:1194/udp"),
+    ] {
+        let (ok, said) = rakhsh(&[
+            "init",
+            "--tunnel-addr",
+            "198.51.100.7:7030",
+            "--peer-ip",
+            "203.0.113.9",
+            "--carrier",
+            carrier,
+            "--forward",
+            forward,
+        ]);
+        assert!(ok, "init {carrier}: {said}");
+        let halves: Vec<&str> = said.split("##########").collect();
+        assert_eq!(halves.len(), 5, "init {carrier}: {said}");
+
+        let dir =
+            std::env::temp_dir().join(format!("rakhsh-init-{}-{carrier}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a working directory");
+        for (name, body) in [("entry", halves[2]), ("exit", halves[4])] {
+            let path = dir.join(format!("{name}.toml"));
+            std::fs::write(&path, body.trim_start()).expect("writing the config");
+            let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+            assert!(ok, "{carrier} {name}: {said}");
+            for bad in ["WARNING", "note:"] {
+                assert!(
+                    !said.contains(bad),
+                    "init wrote a {carrier} {name} that check calls out with {bad}: {said}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[test]
@@ -134,7 +198,10 @@ fn a_datagram_carrier_puts_the_udp_forward_on_both_ends() {
             body.contains("udp = true"),
             "{name} needs the udp forward: a datagram carrier reads it on both ends\n{body}"
         );
-        assert!(body.contains("[openvpn]"), "{name} keeps the section too\n{body}");
+        assert!(
+            body.contains("[openvpn]"),
+            "{name} keeps the section too\n{body}"
+        );
     }
 
     let (ok, said) = rakhsh(&[
@@ -163,8 +230,14 @@ fn check_refuses_a_datagram_config_that_run_would_refuse() {
 
     let no_forward = config(base);
     let (ok, said) = rakhsh(&["check", "-c", &no_forward.display().to_string()]);
-    assert!(!ok, "a datagram carrier with no udp forward cannot run: {said}");
-    assert!(said.contains("udp = true"), "the error names the fix: {said}");
+    assert!(
+        !ok,
+        "a datagram carrier with no udp forward cannot run: {said}"
+    );
+    assert!(
+        said.contains("udp = true"),
+        "the error names the fix: {said}"
+    );
 
     let tcp_forward = config(&format!(
         "{base}\n[[forward]]\nlisten = \"0.0.0.0:1194\"\ntarget = \"127.0.0.1:1194\"\n"
@@ -184,14 +257,20 @@ fn check_refuses_a_datagram_config_that_run_would_refuse() {
     let whole = config(&format!("{base}{fwd}"));
     let (ok, said) = rakhsh(&["check", "-c", &whole.display().to_string()]);
     assert!(ok, "a complete datagram config passes: {said}");
-    assert!(said.contains("carries udp 0.0.0.0:1194 -> 127.0.0.1:1194"), "{said}");
+    assert!(
+        said.contains("carries udp 0.0.0.0:1194 -> 127.0.0.1:1194"),
+        "{said}"
+    );
 }
 
 #[test]
 fn the_openvpn_command_needs_the_section() {
     let path = config("");
     let (ok, said) = rakhsh(&["openvpn", "-c", &path.display().to_string()]);
-    assert!(!ok, "a config with no [openvpn] has nothing to print: {said}");
+    assert!(
+        !ok,
+        "a config with no [openvpn] has nothing to print: {said}"
+    );
     assert!(said.contains("no [openvpn]"), "{said}");
 }
 
@@ -206,5 +285,72 @@ fn check_refuses_a_forward_that_is_not_an_address() {
         let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
         assert!(!ok, "check must reject {body:?}, it said: {said}");
         assert!(!said.contains("config OK"), "{said}");
+    }
+}
+
+#[test]
+fn a_sync_listen_with_a_port_is_refused_before_it_fails_to_bind() {
+    let path = config("accept_sync = true\nsync_listen = \"127.0.0.1:7777\"\n");
+    let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+    assert!(
+        !ok,
+        "the port of a pushed forward comes from the panel: {said}"
+    );
+    assert!(
+        said.contains("bare address"),
+        "the error says the shape: {said}"
+    );
+    let path = config("accept_sync = true\nsync_listen = \"127.0.0.1\"\n");
+    let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+    assert!(ok, "a bare address is what it wants: {said}");
+}
+
+#[test]
+fn check_says_where_mss_clamp_applies() {
+    let path = config("mss_clamp = 1380\n");
+    let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+    assert!(ok, "{said}");
+    assert!(
+        said.contains("mss_clamp is read in layer-3 mode only"),
+        "a key that does nothing here is said to do nothing: {said}"
+    );
+
+    let path = config("l3_addr = \"10.77.0.1/30\"\nl3_auto_mtu = true\nmss_clamp = 1300\n");
+    let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+    assert!(ok, "{said}");
+    assert!(
+        said.contains("layer 3: a tun device on 10.77.0.1/30"),
+        "{said}"
+    );
+    assert!(
+        said.contains("mtu 1380"),
+        "tcp carries 1380 under l3_auto_mtu: {said}"
+    );
+    assert!(said.contains("mss clamped to 1300, against 1340"), "{said}");
+    assert!(
+        !said.contains("mss_clamp is read in layer-3 mode only"),
+        "{said}"
+    );
+
+    let path = config("l3_addr = \"10.77.0.1/30\"\nl3_mtu = 1280\nmss_clamp = 1380\n");
+    let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+    assert!(ok, "{said}");
+    assert!(
+        said.contains("WARNING: mss_clamp = 1380 is above the 1240"),
+        "a clamp wider than the device is a warning: {said}"
+    );
+}
+
+#[test]
+fn check_names_what_a_datagram_carrier_does_not_read() {
+    let path = config(
+        "carrier = \"shabdiz-udp\"\nresume = true\nlanes = 4\nlimit = \"100mbit\"\n\
+         \n[[forward]]\nlisten = \"0.0.0.0:1194\"\ntarget = \"127.0.0.1:1194\"\nudp = true\n\
+         \n[[inbound]]\ntype = \"socks\"\nlisten = \"127.0.0.1:1080\"\n",
+    );
+    let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+    assert!(ok, "the config is valid, just partly inert: {said}");
+    for key in ["lanes", "resume", "[[inbound]]", "the limit and quota keys"] {
+        assert!(said.contains(key), "{key} is not named as ignored: {said}");
     }
 }

@@ -1,234 +1,606 @@
-# Every key rakhsh understands, with a working value for each.
-# Run `rakhsh init` or `rakhsh fleet` to get a real config with real keys;
-# this file is here so the whole surface is visible in one place, and
-# `rakhsh check -c rakhsh.example.toml` will read it back to you in prose.
+# rakhsh — the complete configuration reference.
 #
-# Anything left out takes the default noted beside it.
-# TOML rule: every plain key below belongs to the file itself, so they all
-# come before the first [table].
+# Every key the parser accepts appears below exactly once, with its default,
+# its units, and which side reads it. A key that does not apply to the live
+# example is left commented, next to the note that says when to uncomment it.
+#
+# This file is a reference, not a config to deploy. For something to run:
+#
+#   examples/entry.toml + examples/exit.toml         a tunnel over wss
+#   examples/openvpn-entry.toml + -exit.toml         OpenVPN over shabdiz
+#   examples/l3-entry.toml + -exit.toml              a routed tun device
+#   examples/raw-entry.toml + -exit.toml             forged TCP packets
+#   examples/node.toml                               a proxy on one host
+#
+#   rakhsh init --tunnel-addr <exit-ip>:443 --carrier wss   both halves, real keys
+#   rakhsh check -c <file>                                  read any config back
+#
+# The live example here is an ENTRY that ACCEPTS lanes over wss, forwards two
+# ports, serves a SOCKS/HTTP proxy with routing rules and runs a resolver.
+# `rakhsh check -c rakhsh.example.toml` reports it without a warning.
+#
+# TOML places a bare key in the table above it, so every key that belongs to
+# the file itself must come before the first [table]. That is why the whole
+# flat surface is listed first.
 
-# ─── identity ──────────────────────────────────────────────────────────────
-role = "entry"                  # entry · exit · node
+
+# ── identity ────────────────────────────────────────────────────────────────
+# All four are bound into the handshake transcript. A disagreement on any of
+# them does not downgrade: the lanes never connect, and the accepting side
+# logs which one.
+
+role = "entry"
+# entry · exit · node. Required.
+#   entry  holds the lanes users reach, and may proxy and route
+#   exit   answers the entry and reaches the destination network
+#   node   no peer at all: a proxy and router on one host
+
 token = "ERERERERERERERERERERERERERERERERERERERERERE="
-static_secret = "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="
-peer_public = "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="
-encryption = "full"             # full (default) · none
-resume = true                   # keep streams alive across a lane's death
-resume_grace = 60               # seconds a stream waits for a lane, default 60
+# base64, 32 bytes. The pre-shared key mixed into every handshake, and the
+# seed the raw carriers derive their port pair from. Byte-identical on both
+# ends. Required for entry and exit, unused by node.
 
-# ─── where the tunnel lives ────────────────────────────────────────────────
-tunnel_listen = "0.0.0.0:7000"  # the side that accepts lanes
-tunnel_connect = "203.0.113.9:7000"
-dial = "exit"                   # which side opens the flow: exit (default) · entry
-lanes = 4                       # lanes the dialling side opens, default 4
-max_connections = 4096          # concurrent streams, default unlimited
-heartbeat = 10                  # seconds, default from `preset`
-keepalive = 30                  # seconds, default from `preset`
-preset = "balance"              # balance (default) · turbo · aggressive · throughput
+static_secret = "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="
+# base64, 32 bytes. THIS node's private key. Different on every node, and it
+# never leaves the host. `rakhsh keygen` prints a fresh pair.
+
+peer_public = "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="
+# base64, 32 bytes. The other end's public key. Leave it out when the peers
+# are listed as [[peer]] blocks instead; one or the other is required.
+#
+# The three values above are placeholders — 0x11, 0x22 and 0x33 repeated. They
+# authenticate nobody. Run `rakhsh init` or `rakhsh keygen` for real ones.
+
+encryption = "full"
+# full (default) · none.
+#   full  AES-256-GCM on every record
+#   none  the handshake still runs and still authenticates, but records go out
+#         in the clear. Only for a path that is already encrypted end to end.
+# Both ends must agree.
+
+resume = true
+# false (default). TCP streams survive the loss of a lane instead of being
+# terminated with it. Both ends must agree.
+
+resume_grace = 60
+# seconds (default 60). How long a stream waits with no lane at all before it
+# is given up.
+
+
+# ── where the tunnel lives ──────────────────────────────────────────────────
+
+dial = "exit"
+# exit (default) · entry. Which side opens the lanes. The other side listens.
+# With role = "entry" and dial = "exit", this config listens — so it reads
+# tunnel_listen and ignores tunnel_connect.
+#
+# On a filtered path this is not a free choice: a datagram carrier measured
+# 29% loss when the entry opened the flow against 0.001% when the exit did.
+
+tunnel_listen = "0.0.0.0:7000"
+# address:port to accept lanes on. Read by the listening side only.
+
+# tunnel_connect = "203.0.113.9:7000"
+# The peer's public address:port. Read by the dialling side only — the side
+# where `dial` names its own role. A datagram carrier also accepts it in place
+# of peer_ip.
+
+lanes = 4
+# default 4. How many lanes the dialling side opens, in total across all
+# links. `status` on either end uses it as the expected count. A raw carrier
+# always runs one lane and ignores this.
+
+max_connections = 4096
+# default unlimited. Concurrent streams through the tunnel.
+
+preset = "balance"
+# balance (default) · turbo · aggressive · throughput. Sets heartbeat and
+# keepalive together, in seconds:
+#   aggressive  5 / 15      turbo       8 / 20
+#   balance    10 / 30      throughput 15 / 30
+
+# heartbeat = 10
+# seconds between lane heartbeats. Overrides the preset's first number.
+
+# keepalive = 30
+# seconds for TCP keepalive on the lane sockets, floored at 5, probing every
+# third of that. Overrides the preset's second number. Stream carriers only
+# (tcp · tls · ws · wss).
+
 control_socket = "/run/rakhsh.sock"
+# default /run/rakhsh.sock. The unix socket `rakhsh status` and the control
+# center read. Two configs on one host each need their own.
+
 access_log = false
-mss_clamp = 1380
+# default false. Log every connection the proxy and the forwards accept.
+
 so_rcvbuf = 8388608
 so_sndbuf = 4194304
+# bytes, unset by default (the kernel decides). SO_RCVBUF and SO_SNDBUF on the
+# lane sockets. Stream carriers only.
 
-# ─── carrier ───────────────────────────────────────────────────────────────
-carrier = "wss"                 # tcp · tls · ws · wss · quic · quicv2 · kcp
-                                # faketcp · icmp · spoof · l2tcp
-                                # shabdiz-gre · shabdiz-l2 · shabdiz-udp · shabdiz-tcp
-sni = "www.cloudflare.com"      # TLS name and WS Host for tls/ws/wss
+# bind = "198.51.100.5"
+# Source address for outgoing lanes. Must already exist on this host. Unset
+# means the kernel picks.
+
+
+# ── carrier ─────────────────────────────────────────────────────────────────
+
+carrier = "wss"
+# tcp (default) · tls · ws · wss · quic · quicv2 · kcp
+#   · faketcp · icmp · spoof · l2tcp
+#   · shabdiz-gre · shabdiz-l2 · shabdiz-udp · shabdiz-tcp
+#
+# Both ends must name the same one. `rakhsh doctor` measures which of them
+# actually cross a path, and writes a config with the survivors in order.
+
+sni = "www.cloudflare.com"
+# The TLS server name, and the WebSocket Host header, for tls · ws · wss. The
+# listening side also derives its self-signed certificate from it.
+
 ws_path = "/live"
+# default "/". The path the WebSocket upgrade must request. Identical on both
+# ends: the listening side rejects — or decoys — anything else.
+
 ws_credential = "a-shared-string"
-decoy = true                    # serve a decoy site to anything that is not us
-tls_fingerprint = "chrome"      # chrome (default) · firefox · rustls
-tls_frag = 64                   # split the opening bytes into pieces this size
-edge_ip = "1.1.1.1:443"         # dial a CDN edge, present `sni` as the name
-# cert_path = "/etc/rakhsh/fullchain.pem"   # a real certificate instead of self-signed
-# key_path  = "/etc/rakhsh/privkey.pem"
-quic_mask = false
-quic_version = 4278190109       # 0xff00001d, a draft version
-congestion = "bbr"              # bbr (default) · cubic
-# bind = "203.0.113.5"            # source address for lanes; must exist on this host
-peer_ip = "203.0.113.9"         # the peer's address; raw carriers need it on both ends
+# unset by default. A shared string the upgrade must carry. Without it, any
+# client that guesses ws_path gets a lane attempt.
 
-# ─── pacing, for carriers that put datagrams on the wire ───────────────────
-pace_burst = 12                 # datagrams per write
-pace_gap_us = 1000              # microseconds between groups
-pace_pps = 9000                 # datagrams a second; the knob to set once measured
-pace_auto = false               # let the carrier find its own rate instead
+decoy = true
+# default: true for ws and wss, false otherwise. Serve an ordinary web
+# response to a request that is not a lane, instead of closing on it.
 
-# ─── raw carriers: forged packets ──────────────────────────────────────────
-reliability = "quic"            # quic (default) · kcp
-fec_data = 0                    # measure before turning this on
-fec_parity = 0
-spoof_src_ip = "198.51.100.7"
-spoof_src_pool = "198.51.100.8,198.51.100.9"
-spoof_peer_ip = "203.0.113.9"
-spoof_peer_src = "203.0.113.10"
-spoof_sockbuf = 4194304
-spoof_ttl_jitter = false
-spoof_dscp_jitter = false
-spoof_rotate_secs = 0
-link_encrypt = true
+# cert_path = "/etc/rakhsh/fullchain.pem"
+# key_path = "/etc/rakhsh/privkey.pem"
+# A real PEM certificate and key for the listening side, instead of the
+# self-signed pair derived from `sni`. Both or neither. `rakhsh check` fails if
+# the files are not readable, so they stay commented here.
 
-# ─── layer 3: a tun device instead of forwards ─────────────────────────────
-l3_addr = "10.77.0.1/30"
-l3_mtu = 1380
-l3_gre = false
-gre_key = 0
-l3_auto_mtu = true
-l3_qdisc = "fq"
-l3_txqueuelen = 1000
-l3_paths = 1
+# tls_fingerprint = "chrome"
+# chrome (default) · firefox · rustls. Which client hello to imitate. Read by
+# the dialling side only.
 
-# ─── more ways to reach the same peer ──────────────────────────────────────
-backup_connect = ["203.0.113.9:7443", "203.0.113.9:8443"]
-link_policy = "failover"        # failover (default) · spread
-link_timeout = 10               # seconds to wait for one attempt
-link_probe = 30                 # seconds between checks for a better link
+# tls_frag = 64
+# bytes, unset by default. Split the first 2048 bytes of the TLS handshake
+# into pieces of this size, so the server name does not arrive in one segment.
+# Read by the dialling side only.
 
-# ─── quotas and rates for the whole node ───────────────────────────────────
-limit = "200mbit"
+# edge_ip = "1.1.1.1:443"
+# Dial this address while still presenting `sni` as the name — a CDN edge that
+# fronts the exit. Read by the dialling side only.
+
+# quic_mask = false
+# default false. XOR every QUIC datagram with a token-derived keystream, so
+# the packets do not read as QUIC. quic · quicv2 only, and both ends must set it.
+
+# quic_version = 4278190109
+# default 4278190109 (0xff00001d, draft-29). The version the dialling side
+# offers first. quic · quicv2 only.
+
+# congestion = "bbr"
+# bbr (default) · cubic. The QUIC congestion controller. quic · quicv2 only;
+# the QUIC that runs inside a raw carrier always uses cubic.
+
+
+# ── pacing ──────────────────────────────────────────────────────────────────
+# Only for the carriers that put datagrams on the wire themselves: the
+# shabdiz-* family and the raw carriers. Measured laws, not preferences: a
+# burst above 2 datagrams was where loss began on the filtered path, and the
+# exit's rate is the one that matters.
+
+# pace_burst = 2
+# datagrams written back to back before the gap. Unset means no shaping.
+
+# pace_gap_us = 1000
+# microseconds to wait between bursts.
+
+# pace_pps = 9000
+# datagrams a second, converted to a burst/gap pair. The one knob to set once
+# the path has been measured; it overrides pace_burst and pace_gap_us.
+
+# pace_auto = false
+# default false. Let the carrier find its own rate from the loss the peer
+# reports, instead of holding the configured one.
+
+
+# ── raw carriers ────────────────────────────────────────────────────────────
+# faketcp · icmp · spoof · l2tcp forge their own packets. They need
+# CAP_NET_RAW, they always run one lane, and both ends need peer_ip.
+
+# peer_ip = "203.0.113.9"
+# The peer's address on the wire. Required on BOTH ends by the raw carriers,
+# because a forged packet has no connection for the kernel to learn it from.
+# A shabdiz-gre or shabdiz-l2 config needs it too.
+
+# reliability = "quic"
+# quic (default) · kcp. What runs on top of the forged packets to recover from
+# loss. The other end must match.
+
+# fec_data = 0
+# fec_parity = 0
+# both default 0 (off). Forward error correction: for every fec_data payload
+# packets, send fec_parity recovery packets. Parity costs bandwidth on every
+# packet, so measure the loss first — it pays on a lossy path and not on a
+# clean one. Both ends must agree.
+
+# link_encrypt = true
+# default true. Encrypt the raw link layer under the session's own
+# encryption. Both ends must agree.
+
+# spoof_src_ip = "198.51.100.77"
+# The source address to forge. Unset means this host's own address.
+
+# spoof_src_pool = "198.51.100.78,198.51.100.79"
+# Comma-separated addresses to rotate through instead of one. Find out which
+# of them the path actually carries with `rakhsh spoof-test`.
+
+# spoof_peer_ip = "203.0.113.9"
+# The peer as it appears on the wire, when that differs from peer_ip.
+
+# spoof_peer_src = "203.0.113.90"
+# The source address the peer forges, so this end recognises its packets.
+
+# spoof_sockbuf = 4194304
+# bytes, unset by default. Socket buffer for the raw socket. Measured slower,
+# not faster, on a CPU-bound entry: upload fell from 11 to 1.5 Mbit/s as the
+# queue grew. `rakhsh check` warns when it is set.
+
+# spoof_ttl_jitter = false
+# spoof_dscp_jitter = false
+# both default false. Vary the TTL and the DSCP field between packets.
+
+# spoof_rotate_secs = 0
+# seconds, default 0 (never). How often to move to the next address in
+# spoof_src_pool.
+
+
+# ── layer 3 ─────────────────────────────────────────────────────────────────
+# Setting l3_addr turns the tunnel into a tun device: whole IP packets instead
+# of forwarded ports. Needs CAP_NET_ADMIN.
+
+# l3_addr = "10.77.0.1/30"
+# This end's address inside the tunnel. The prefix may be left off (/24 for
+# IPv4, /64 for IPv6), and several addresses may be given, comma-separated, to
+# put both families on the device. The other end takes another address in the
+# same network. The kernel names the device — `ip -br addr` shows which.
+
+# l3_mtu = 1380
+# bytes, default 1380. The MTU set on the tun device.
+
+# mss_clamp = 1300
+# bytes, unset by default. Rewrite the MSS a TCP handshake inside the tunnel
+# announces, so neither end asks for segments the device will drop. Layer 3
+# only — nothing else reads it, and `rakhsh check` says so when it is set
+# without l3_addr. The room is the device MTU less 40.
+
+# l3_auto_mtu = true
+# default false. Take the MTU from the carrier instead of l3_mtu: 1340 for
+# ws · wss · tls, 1300 for quic, 1360 for kcp and the raw carriers, 1380
+# otherwise, less 8 more when l3_gre is on — and the smallest of those across
+# every link in use.
+
+# l3_gre = false
+# default false. Wrap the inner packets in GRE instead of sending them plain.
+
+# gre_key = 0
+# default 0. The GRE key, when l3_gre is on. Both ends must match.
+
+# l3_qdisc = "fq"
+# default fq. The queue discipline for the tun device.
+
+# l3_txqueuelen = 1000
+# packets, default 1000. The device's transmit queue.
+
+# l3_paths = 1
+# Round-robin the inner packets over at most this many lanes. Unset uses every
+# live lane; 1 pins them to one lane, which keeps them in order.
+
+
+# ── more ways to reach the same peer ────────────────────────────────────────
+
+# backup_connect = ["203.0.113.9:7443", "203.0.113.9:8443"]
+# More addresses for the same carrier, tried in order after tunnel_connect.
+# Read by the dialling side only. For a different carrier, use [[link]].
+
+link_policy = "failover"
+# failover (default) · spread.
+#   failover  every lane prefers the first link, and moves back to it when it
+#             recovers
+#   spread    lane n starts its attempts at link n, so the lanes end up spread
+#             across the links that work
+
+link_timeout = 10
+# seconds, default 10, floored at 2. How long one attempt on one link may take
+# before the next is tried.
+
+link_probe = 30
+# seconds, default 30. How often to check whether a better link has come back.
+# 0 never moves back on its own.
+
+
+# ── limits and quotas ───────────────────────────────────────────────────────
+# The same keys apply here (the whole process), inside [[forward]] and inside
+# [[inbound]]. The scopes stack: the narrowest cap wins.
+
+# limit = "200mbit"
+# Both directions. limit_up and limit_down override it per direction.
+
 limit_up = "100mbit"
 limit_down = "200mbit"
+# Per direction. A unit is required: bit · kbit · mbit · gbit for bits, B · kB
+# · MB · GB for bytes, with an optional /s or ps — "20mbit", "1.5gbit/s",
+# "5MB/s". A bare number is rejected rather than guessed at.
+
 limit_per_stream = "20mbit"
+# The same cap applied to each connection separately.
+
 quota = "500gb"
-quota_period = "month"          # day · week · month · never
+# Total bytes, both directions together, per period. kb · mb · gb · tb are
+# powers of 1000, kib · mib · gib · tib powers of 1024, and a bare number is
+# bytes.
+
+quota_period = "month"
+# day · week · month (default) · never. When the counter resets.
+
 quota_state = "/var/lib/rakhsh/quota.json"
+# Where the counters are saved so a restart does not forget them. Default:
+# rakhsh-quota.json beside the config file.
 
-# ─── reading forwards from a panel, and syncing them to the other side ─────
-xui_panel = "https://panel.example:2053"
-xui_token = "a-session-cookie-or-token"
-xui_interval = 60
-xui_target_host = "127.0.0.1"
-xui_proxy_protocol = false
+
+# ── an x-ui panel as the source of forwards ─────────────────────────────────
+# The exit polls the panel and pushes the port list to the entry, which opens
+# those ports. Two sides, two sets of keys.
+
+# xui_panel = "https://panel.example:2053"
+# The panel's base URL. Read by the EXIT. Setting it turns the poller on.
+
+# xui_token = "a-session-cookie-or-token"
+# The panel session to poll with. Read by the exit.
+
+# xui_interval = 60
+# seconds, default 10, floored at 2. How often to poll.
+
+# xui_target_host = "127.0.0.1"
+# default 127.0.0.1. The host the exit connects to for a panel port, when the
+# service is not on the exit itself.
+
+# xui_proxy_protocol = false
+# default false. Prepend a PROXY protocol v1 header to those connections.
+
 accept_sync = false
-sync_listen = "127.0.0.1:7777"
-sync_ports = ["443", "8443"]
+# default false. Read by the ENTRY: accept the port list the exit pushes and
+# open those ports. Without it the push is ignored.
 
-# ─── carrying an OpenVPN server ────────────────────────────────────────────
-# `rakhsh openvpn -c this.toml` prints the directives for both OpenVPN ends,
-# with the tun-mtu worked out from the carrier. Needs a matching [[forward]]:
-# udp = true for proto = "udp", a stream forward for proto = "tcp".
-[openvpn]
-proto = "udp"                   # udp · tcp
-port = 1194
-device = "tun"                  # tun · tap
-crypto = "aead"                 # aead (default) · cbc-sha1 · cbc-sha256 · cbc-sha512
-server = "127.0.0.1:1194"       # where the OpenVPN server is, from the exit
-compress = false                # adds one byte of framing per packet
-peer_id = true                  # OpenVPN 2.4+ negotiates a 3-byte peer id
-epoch = true                    # OpenVPN 2.7's AEAD epoch format: 8 bytes, not 4.
-                                # Set false for 2.6 and earlier.
-# listen = "0.0.0.0:1194"       # defaults to 0.0.0.0:<port>
-# overhead = 28                 # override the computed per-packet overhead
+sync_listen = "0.0.0.0"
+# default 0.0.0.0. The address — with NO port — the pushed ports are opened
+# on. The port comes from the panel, so "0.0.0.0:7777" here would be read as a
+# host called "0.0.0.0:7777" and fail to bind.
 
-# ─── more peers: one entry per node on the other side ──────────────────────
+sync_ports = ["443", "8443", "20000-30000"]
+# default 1024-65535. Which ports a push is allowed to open. Single ports and
+# ranges. The tunnel's own port and every static [[forward]] port are reserved
+# whatever this says.
+
+
+# ── OpenVPN ─────────────────────────────────────────────────────────────────
+# Carry an OpenVPN server through the tunnel. `rakhsh openvpn -c <config>`
+# prints the directives for both OpenVPN ends with tun-mtu already worked out
+# from the carrier. A matching [[forward]] is required: udp = true for
+# proto = "udp", a stream forward for proto = "tcp".
+#
+# For proto = "udp", carry it on a shabdiz-* carrier. Inside a reliable
+# carrier every lost packet is retransmitted in order, which is the opposite
+# of what a VPN wants. See examples/openvpn-entry.toml.
+
+# [openvpn]
+# proto = "udp"
+# udp (default) · tcp.
+
+# port = 1194
+# default 1194. The port clients reach, and the port the server listens on.
+
+# listen = "0.0.0.0:1194"
+# default 0.0.0.0:<port>. Where the entry accepts clients. Must equal the
+# matching [[forward]] listen.
+
+# server = "127.0.0.1:1194"
+# default 127.0.0.1:<port>. Where the OpenVPN server is, as seen from the
+# exit.
+
+# device = "tun"
+# tun (default) · tap. tap bridges Ethernet frames and costs 14 more bytes per
+# packet.
+
+# crypto = "aead"
+# aead (default) · cbc-sha1 · cbc-sha256 · cbc-sha512. Which OpenVPN cipher
+# the overhead is computed for. aead means AES-GCM or ChaCha20-Poly1305.
+
+# compress = false
+# default false. Adds one framing byte per packet even when nothing compresses.
+
+# peer_id = true
+# default true. OpenVPN 2.4 and later negotiate a 3-byte peer id.
+
+# epoch = true
+# default true. OpenVPN 2.7 negotiates the AEAD epoch format: 8 bytes of epoch
+# and counter instead of the 4-byte packet id. Set false for 2.6 and earlier,
+# or every derived tun-mtu is 4 bytes too high.
+
+# overhead = 28
+# bytes, unset by default. Override the computed per-packet overhead. Only for
+# a build whose framing is not one of the combinations above.
+
+
+# ── peers ───────────────────────────────────────────────────────────────────
+# One [[peer]] per node on the other side, in place of peer_public — or
+# alongside it, which admits both. Identity is the public key, not the
+# address. `rakhsh fleet` generates a whole mesh.
+
 [[peer]]
 name = "de"
+# What this peer is called in the log and in `rakhsh status`. Defaults to
+# peer1, peer2 … in file order.
 public = "REREREREREREREREREREREREREREREREREREREREREQ="
-connect = "203.0.113.20:7000"   # only on the side that dials
+# base64, 32 bytes. The peer's static public key. Required, and unique: two
+# [[peer]] blocks with the same key are rejected.
+# connect = "203.0.113.20:7000"
+# Where to dial this peer. Read by the dialling side only, so it is left out
+# here. A peer without it can still connect inbound.
 
-[[peer]]
-name = "nl"
-public = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
-connect = "203.0.113.21:7000"
 
-# ─── another carrier to the same peer ──────────────────────────────────────
+# ── links ───────────────────────────────────────────────────────────────────
+# Another carrier to the same peer. Everything not named here is inherited
+# from the top level. Links are tried under link_policy above.
+#
+# `addr` means different things on the two sides, because a link is one end of
+# the same pair: the address to bind on the listening side, the address to
+# dial on the dialling side. This config listens, so it is a local address.
+
 [[link]]
 carrier = "quic"
-addr = "203.0.113.9:7443"
-sni = "www.cloudflare.com"
-ws_path = "/live"
-ws_credential = "a-shared-string"
-decoy = true
-edge_ip = "1.1.1.1:443"
-tls_fingerprint = "firefox"
-tls_frag = 48
-pace_burst = 12
-pace_gap_us = 1000
-pace_pps = 9000
-pace_auto = false
-quic_mask = false
-quic_version = 4278190109
+addr = "0.0.0.0:7443"
+# Optional per-link overrides, each exactly as documented above:
+#   sni · ws_path · ws_credential · decoy · edge_ip · tls_fingerprint
+#   tls_frag · cert_path · key_path · quic_mask · quic_version · reliability
+#   pace_burst · pace_gap_us · pace_pps · pace_auto
+sni = "www.microsoft.com"
+quic_mask = true
+quic_version = 1
 reliability = "quic"
-# cert_path = "/etc/rakhsh/fullchain.pem"
-# key_path  = "/etc/rakhsh/privkey.pem"
+pace_auto = false
 
-# ─── forwarded ports ───────────────────────────────────────────────────────
+
+# ── forwarded ports ─────────────────────────────────────────────────────────
+# The entry accepts on `listen`, the exit connects to `target`. The target is
+# resolved at the exit, so it may name a host only reachable there.
+
 [[forward]]
 listen = "0.0.0.0:443"
+# address:port on this host. Required.
 target = "127.0.0.1:8443"
+# host:port the exit connects to. Required.
 udp = false
+# default false. true carries datagrams instead of a stream.
 proxy_protocol = false
-limit = "50mbit"
+# default false. Prepend a PROXY protocol v1 header, so the service behind the
+# forward sees the real client address.
 limit_up = "25mbit"
 limit_down = "50mbit"
 limit_per_stream = "10mbit"
 quota = "100gb"
 quota_period = "month"
+# Any of the limit and quota keys, scoped to this forward.
 
 [[forward]]
 listen = "0.0.0.0:51820"
 target = "127.0.0.1:51820"
 udp = true
+# A WireGuard endpoint: udp, no limits, nothing else needed.
 
-# the forward the [openvpn] section above pairs with
-[[forward]]
-listen = "0.0.0.0:1194"
-target = "127.0.0.1:1194"
-udp = true
 
-# ─── the proxy side: inbounds, outbounds, routing ──────────────────────────
+# ── inbounds ────────────────────────────────────────────────────────────────
+
 [[inbound]]
 tag = "proxy"
-type = "mixed"                  # mixed · socks · http
+# Optional. What the router's `inbound` matcher calls this one.
+type = "mixed"
+# mixed · socks · http. Required. mixed detects SOCKS5 or HTTP CONNECT per
+# connection.
 listen = "127.0.0.1:1080"
+# address:port. Required.
 username = "user"
 password = "pass"
+# A non-loopback inbound without both is refused.
 limit = "80mbit"
 quota = "50gb"
 quota_period = "day"
+# Any of the limit and quota keys, scoped to this inbound.
+
+
+# ── outbounds ───────────────────────────────────────────────────────────────
+# Every outbound a rule names must exist. `tag` and `type` are required.
 
 [[outbound]]
 tag = "tunnel"
 type = "tunnel"
+# Through the lanes to the peer. Needs role entry or exit.
 
 [[outbound]]
 tag = "direct"
 type = "direct"
+# From this host, as itself.
 
 [[outbound]]
 tag = "block"
 type = "block"
+# Refused, with nothing dialled.
 
 [[outbound]]
 tag = "upstream"
-type = "socks"                  # socks · http
+type = "socks"
+# socks · http: chain into another proxy.
 server = "127.0.0.1:9050"
+# address:port of that proxy. Required for socks and http.
 username = "user"
 password = "pass"
+# Its credentials, if it wants any.
+
+
+# ── routing ─────────────────────────────────────────────────────────────────
 
 [route]
-final = "tunnel"                # the outbound used when no rule matches
-resolve = false                 # resolve names before matching ip_cidr rules
+final = "tunnel"
+# The outbound for a connection no rule matched. Defaults to the first
+# outbound in the file.
+resolve = false
+# default false. Resolve the destination name before matching ip_cidr, so a
+# name that resolves into a listed range matches it. Costs a lookup.
 
 [[route.rule]]
+# Rules are first match wins, so put the specific ones first. Within a rule
+# the destination matchers combine with OR; `inbound` and `port` narrow it.
 outbound = "direct"
+# Required. Must be one of the tags above.
 inbound = ["proxy"]
+# Only connections that arrived on these inbounds.
 domain = ["example.com"]
+# Exact names.
 domain_suffix = [".ir"]
+# Names ending in these.
 domain_keyword = ["internal"]
+# Names containing these.
 ip_cidr = ["10.0.0.0/8", "192.168.0.0/16"]
+# Destination addresses in these ranges.
 port = ["80", "8000-8100"]
+# Single ports and ranges.
 # rule_file = "/etc/rakhsh/iran.txt"
+# One matcher per line, added to this rule at startup, with `#` starting a
+# comment: `domain:example.com`, `suffix:.ir`, `keyword:internal`,
+# `cidr:10.0.0.0/8`. A bare network is a range and anything else is a suffix,
+# so a plain list of names works. A file that cannot be read is a warning, not
+# a failure, and the rule keeps its inline matchers. `rakhsh rules` writes one.
 
-# ─── the built-in resolver ─────────────────────────────────────────────────
+
+# ── resolver ────────────────────────────────────────────────────────────────
+
 [dns]
 listen = "127.0.0.1:5353"
+# address:port to answer queries on. Required.
 local = ["1.1.1.1:53", "8.8.8.8:53"]
+# Resolvers reached directly from this host. Default: whatever
+# /etc/resolv.conf names, minus this server itself. If that leaves none, the
+# config is rejected rather than started with no way to resolve.
 remote = ["1.1.1.1:53"]
+# Resolvers reached through the tunnel; default 1.1.1.1 and 8.8.8.8. A name
+# whose route is the tunnel is resolved here, so the answer matches where the
+# traffic will go.
 cache = 4096
+# entries, default 4096. 0 disables the cache.
 cache_min_ttl = 60
 cache_max_ttl = 3600
+# seconds, defaults 30 and 3600. Clamp the TTL an answer is kept for.
 timeout = 5
+# seconds, default 3, floored at 1. How long one upstream may take.
 allow = ["127.0.0.0/8", "10.0.0.0/8"]
+# Which clients may query. Empty means anyone who can reach `listen`, which
+# rakhsh warns about unless `listen` is a loopback address.

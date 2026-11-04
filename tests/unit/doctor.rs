@@ -40,9 +40,15 @@ fn a_probe_config_keeps_the_identity_and_drops_everything_else() {
     assert_eq!(cfg.tunnel_listen.as_deref(), Some("0.0.0.0:7901"));
     assert_eq!(cfg.tunnel_connect.as_deref(), Some("198.51.100.7:7901"));
     assert!(cfg.forward.is_empty(), "a probe carries no user traffic");
-    assert!(cfg.link.is_empty(), "the links under test are tried one by one");
+    assert!(
+        cfg.link.is_empty(),
+        "the links under test are tried one by one"
+    );
     assert!(cfg.openvpn.is_none());
-    assert_eq!(cfg.token, b.token, "the identity is kept, or nothing connects");
+    assert_eq!(
+        cfg.token, b.token,
+        "the identity is kept, or nothing connects"
+    );
     assert_eq!(cfg.static_secret, b.static_secret);
 }
 
@@ -57,7 +63,9 @@ fn a_verdict_reads_as_its_state() {
     assert!(Verdict::refused("kcp", "no route")
         .line()
         .contains("unreachable"));
-    assert!(Verdict::refused("kcp", "no route").line().contains("no route"));
+    assert!(Verdict::refused("kcp", "no route")
+        .line()
+        .contains("no route"));
 }
 
 #[test]
@@ -96,7 +104,10 @@ fn the_emitted_config_puts_the_fastest_first_and_the_rest_as_links() {
     };
     let cfg = r.config("198.51.100.7", 443, true);
     assert!(cfg.contains("carrier = \"wss\""), "{cfg}");
-    assert!(cfg.contains("tunnel_connect = \"198.51.100.7:443\""), "{cfg}");
+    assert!(
+        cfg.contains("tunnel_connect = \"198.51.100.7:443\""),
+        "{cfg}"
+    );
     assert!(cfg.contains("[[link]]\ncarrier = \"tcp\""), "{cfg}");
     assert!(
         !cfg.contains("quic"),
@@ -204,7 +215,77 @@ fn the_protocols_that_crossed_are_recorded_for_the_reader() {
         ],
     };
     assert_eq!(r.crossing(), vec!["GRE (47)", "ESP (50)"]);
-    assert!(r.config("198.51.100.7", 443, true).contains("GRE (47), ESP (50)"));
+    assert!(r
+        .config("198.51.100.7", 443, true)
+        .contains("GRE (47), ESP (50)"));
+}
+
+#[test]
+fn the_written_config_only_sets_what_the_winning_carrier_reads() {
+    let stream = Report {
+        verdicts: vec![
+            verdict("wss", true, true, 90.0),
+            verdict("quic", true, true, 50.0),
+        ],
+        protocols: vec![],
+    };
+    let text = stream.config("198.51.100.7", 443, true);
+    assert!(text.contains("lanes = 4"), "{text}");
+    assert!(text.contains("[[link]]\ncarrier = \"quic\""), "{text}");
+    assert!(
+        !text.contains("peer_ip"),
+        "a stream carrier learns the peer from its socket"
+    );
+
+    let raw = Report {
+        verdicts: vec![verdict("faketcp", true, true, 40.0)],
+        protocols: vec![],
+    };
+    let text = raw.config("198.51.100.7", 443, true);
+    assert!(
+        text.contains("lanes = 1"),
+        "a raw carrier runs one lane: {text}"
+    );
+    assert!(text.contains("peer_ip = \"198.51.100.7\""), "{text}");
+
+    let dgram = Report {
+        verdicts: vec![
+            verdict("shabdiz-gre", true, true, 200.0),
+            verdict("wss", true, true, 90.0),
+        ],
+        protocols: vec![],
+    };
+    let text = dgram.config("198.51.100.7", 443, true);
+    assert!(
+        !text.contains("lanes ="),
+        "a datagram carrier reads no lanes: {text}"
+    );
+    assert!(!text.contains("\n[[link]]"), "nor any links: {text}");
+    assert!(
+        text.contains("# The carriers that also held, in measured order: wss."),
+        "{text}"
+    );
+    assert!(text.contains("peer_ip = \"198.51.100.7\""), "{text}");
+    assert!(
+        text.contains("udp = true"),
+        "it carries one udp forward: {text}"
+    );
+    let cfg: Config = toml::from_str(&format!(
+        "role = \"entry\"\n\
+         token = \"ERERERERERERERERERERERERERERERERERERERERERE=\"\n\
+         static_secret = \"IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=\"\n\
+         peer_public = \"MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=\"\n{text}"
+    ))
+    .expect("what doctor writes parses");
+    assert_eq!(cfg.carrier.as_deref(), Some("shabdiz-gre"));
+    assert!(
+        crate::dgram::validate(&cfg).is_ok(),
+        "and it is a config run would take"
+    );
+    assert!(
+        crate::dgram::ignored(&cfg).is_empty(),
+        "with nothing inert in it"
+    );
 }
 
 #[test]

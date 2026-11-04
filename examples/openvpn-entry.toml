@@ -1,0 +1,58 @@
+# OpenVPN over a datagram carrier — the ENTRY half.
+#
+# Runs on the server VPN clients reach. Pairs with examples/openvpn-exit.toml.
+# Clients connect to this host on 1194/udp; the OpenVPN server itself sits
+# behind the exit.
+#
+# shabdiz-gre carries one client datagram as one GRE packet, so a lost packet
+# costs that packet alone. Inside a reliable carrier it would be retransmitted
+# in order instead, which is the opposite of what a VPN wants.
+#
+#   rakhsh check   -c examples/openvpn-entry.toml    validate, and see the carried size
+#   rakhsh openvpn -c examples/openvpn-entry.toml    the directives for both OpenVPN ends
+#   rakhsh doctor  -c examples/openvpn-entry.toml --serve    does this path carry GRE at all?
+#
+# Needs root (CAP_NET_RAW). GRE has no ports, so both ends need a routable
+# address and it cannot cross NAT.
+
+# Identity. Placeholders — see examples/entry.toml.
+role = "entry"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="
+static_secret = "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="
+peer_public = "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="
+
+carrier = "shabdiz-gre"
+
+# The exit's address. Required on both ends: a forged GRE packet carries no
+# connection for the kernel to learn the far side from.
+peer_ip = "203.0.113.9"
+
+# The exit opens the flow. This is the default, and on a filtered path it is
+# not a free choice: the side that opens it measured 29% loss against 0.001%.
+dial = "exit"
+
+# Start at the safe burst and let the carrier find its own rate from the loss
+# the peer reports. The log prints both directions; pin pace_pps once the path
+# has settled.
+pace_burst = 2
+pace_auto = true
+
+control_socket = "/run/rakhsh-ovpn.sock"
+
+# One UDP forward per datagram tunnel, on both halves. Clients reach `listen`
+# here; the exit delivers to `target` there.
+[[forward]]
+listen = "0.0.0.0:1194"
+target = "127.0.0.1:1194"
+udp = true
+
+# Not a second OpenVPN config — this block only tells rakhsh what OpenVPN's
+# framing costs, so `rakhsh openvpn` can work out tun-mtu from what the
+# carrier actually carries. Set epoch = false for OpenVPN 2.6 and earlier.
+[openvpn]
+proto = "udp"
+port = 1194
+device = "tun"
+crypto = "aead"
+epoch = true
+server = "127.0.0.1:1194"

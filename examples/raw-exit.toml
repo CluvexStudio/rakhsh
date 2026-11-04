@@ -1,0 +1,27 @@
+# Forged TCP packets — the EXIT half.
+#
+# Pairs with examples/raw-entry.toml and dials it. carrier, reliability, the
+# fec pair and link_encrypt must all match that half; `token` must too, because
+# both ends derive the same crafted port pair from it, which is also what to
+# filter a packet capture on.
+#
+#   rakhsh check -c examples/raw-exit.toml
+#
+# Needs root (CAP_NET_RAW).
+
+# Identity. Placeholders — see examples/entry.toml.
+role = "exit"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="
+static_secret = "REREREREREREREREREREREREREREREREREREREREREQ="
+peer_public = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
+
+carrier = "faketcp"
+tunnel_connect = "198.51.100.7:7000"
+
+# The entry's address.
+peer_ip = "198.51.100.7"
+
+lanes = 1
+reliability = "quic"
+
+control_socket = "/run/rakhsh-raw.sock"

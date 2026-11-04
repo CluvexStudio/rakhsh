@@ -1,5 +1,5 @@
 use crate::{
-    config, dgram, doctor, engine, entry, exit, fleet, limits, links, noise, openvpn, raw,
+    config, dgram, doctor, engine, entry, exit, fleet, l3, limits, links, noise, openvpn, raw,
     resume, status, xui,
 };
 use anyhow::{bail, Context, Result};
@@ -280,11 +280,16 @@ pub async fn run() -> Result<()> {
         }
         Cmd::Check { config } => {
             let cfg = config::Config::load(&config)?;
-            println!(
-                "role {}, carrier {}",
-                cfg.role,
-                cfg.carrier.as_deref().unwrap_or("tcp")
-            );
+            entry::validate(&cfg)?;
+            if cfg.role == "node" {
+                println!("role node — a proxy and router on this host, with no tunnel peer");
+            } else {
+                println!(
+                    "role {}, carrier {}",
+                    cfg.role,
+                    cfg.carrier.as_deref().unwrap_or("tcp")
+                );
+            }
             if matches!(
                 cfg.carrier.as_deref(),
                 Some("faketcp" | "l2tcp" | "icmp" | "spoof")
@@ -345,6 +350,20 @@ pub async fn run() -> Result<()> {
                     f.target
                 );
             }
+            if cfg.xui_panel.is_some() && cfg.role != "exit" {
+                println!(
+                    "  note: xui_panel is read by the exit, which polls the panel and pushes the \
+                     port list across. On a {} it does nothing.",
+                    cfg.role
+                );
+            }
+            if cfg.accept_sync.unwrap_or(false) && cfg.role != "entry" {
+                println!(
+                    "  note: accept_sync is read by the entry, which opens the ports the exit \
+                     pushes. On a {} it does nothing.",
+                    cfg.role
+                );
+            }
             openvpn::validate(&cfg)?;
             for line in openvpn::describe(&cfg) {
                 println!("{line}");
@@ -363,6 +382,15 @@ pub async fn run() -> Result<()> {
                 for line in links::describe(&cfg)? {
                     println!("{line}");
                 }
+            }
+            if cfg.mss_clamp.is_some() && cfg.l3_addr.is_none() {
+                println!(
+                    "  note: mss_clamp is read in layer-3 mode only, so without l3_addr it has \
+                     no effect"
+                );
+            }
+            for line in l3::describe(&cfg)? {
+                println!("{line}");
             }
             if mode != noise::Mode::Full {
                 println!("  (the other end must set encryption = \"{}\" too, or the lanes will not connect)", mode.as_str());
@@ -798,15 +826,22 @@ fn init(args: &InitArgs) -> Result<()> {
     } else {
         (String::new(), String::new())
     };
+    let lane_line = if datagram {
+        String::new()
+    } else if matches!(carrier, "faketcp" | "l2tcp" | "icmp" | "spoof") {
+        format!("lanes = {}\n", raw::RAW_LANES)
+    } else {
+        format!("lanes = {lanes}\n")
+    };
     let (entry_link, exit_link) = if direct {
         (
-            format!("tunnel_connect = \"{tunnel_addr}\"\nlanes = {lanes}\n{dials_peer_ip}"),
+            format!("tunnel_connect = \"{tunnel_addr}\"\n{lane_line}{dials_peer_ip}"),
             format!("tunnel_listen = \"{bind}\"\n{listens_peer_ip}"),
         )
     } else {
         (
             format!("tunnel_listen = \"{bind}\"\n{listens_peer_ip}"),
-            format!("tunnel_connect = \"{tunnel_addr}\"\nlanes = {lanes}\n{dials_peer_ip}"),
+            format!("tunnel_connect = \"{tunnel_addr}\"\n{lane_line}{dials_peer_ip}"),
         )
     };
 

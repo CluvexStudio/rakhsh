@@ -1,0 +1,64 @@
+# A proxy on one host — no tunnel at all.
+#
+# role = "node" has no peer, so it needs no identity and no carrier: it is the
+# inbounds, the router and the outbounds on their own. Use it to put a routed
+# SOCKS5/HTTP proxy in front of a service, or as the local half of a chain into
+# another proxy.
+#
+#   rakhsh init-node --listen 0.0.0.0:1080     a minimal version of this file
+#   rakhsh check -c examples/node.toml
+#   rakhsh install -c /etc/rakhsh/config.toml
+#
+# A `tunnel` outbound is the one thing it cannot have — there is nothing to
+# send through. Every key is explained in rakhsh.example.toml.
+
+role = "node"
+
+access_log = false
+control_socket = "/run/rakhsh-node.sock"
+
+# Reachable from outside, so credentials are required: rakhsh refuses a
+# non-loopback inbound without them.
+[[inbound]]
+tag = "proxy"
+type = "mixed"
+listen = "0.0.0.0:1080"
+username = "user"
+password = "replace-this"
+limit = "80mbit"
+limit_per_stream = "10mbit"
+quota = "200gb"
+quota_period = "month"
+
+[[outbound]]
+tag = "direct"
+type = "direct"
+
+[[outbound]]
+tag = "block"
+type = "block"
+
+# Chain into another proxy on this host — Tor here, but anything that speaks
+# SOCKS5 or HTTP CONNECT will do.
+[[outbound]]
+tag = "upstream"
+type = "socks"
+server = "127.0.0.1:9050"
+
+[route]
+final = "direct"
+
+# First match wins, so the specific rules come first.
+[[route.rule]]
+outbound = "upstream"
+domain_suffix = [".onion"]
+
+[[route.rule]]
+outbound = "block"
+domain_keyword = ["doubleclick", "googlesyndication"]
+
+[dns]
+listen = "127.0.0.1:5353"
+local = ["1.1.1.1:53", "8.8.8.8:53"]
+cache = 4096
+allow = ["127.0.0.0/8"]

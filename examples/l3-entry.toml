@@ -1,0 +1,37 @@
+# A routed tunnel (layer 3) — the ENTRY half.
+#
+# Setting l3_addr replaces the forwards with a tun device: whole IP packets
+# cross the tunnel, and what reaches the other side is decided by routing
+# rather than by a port list. Pairs with examples/l3-exit.toml.
+#
+#   rakhsh check -c examples/l3-entry.toml
+#   ip -br addr                       which tun device the kernel named it
+#
+# Needs CAP_NET_ADMIN. rakhsh brings the device up with this address; the
+# routes through it are yours to add.
+
+# Identity. Placeholders — see examples/entry.toml.
+role = "entry"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="
+static_secret = "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="
+peer_public = "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="
+
+carrier = "tls"
+sni = "www.cloudflare.com"
+tunnel_listen = "0.0.0.0:443"
+
+# This end inside the tunnel. The exit takes 10.77.0.2 of the same /30.
+l3_addr = "10.77.0.1/30"
+
+# Take the device MTU from the carrier — 1340 for tls — instead of the 1380
+# default. Both ends work it out the same way.
+l3_auto_mtu = true
+
+# The device MTU less 40 bytes of inner IPv4 and TCP header, so a TCP client
+# inside the tunnel stops asking for segments that will not fit.
+mss_clamp = 1300
+
+# Round-robin the packets over one lane only, which keeps them in order.
+l3_paths = 1
+
+control_socket = "/run/rakhsh-l3.sock"

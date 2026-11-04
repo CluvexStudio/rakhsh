@@ -58,7 +58,11 @@ fn the_overhead_is_the_sum_of_what_openvpn_adds() {
     );
 
     let classic = OpenVpn::parse_spec("udp:1194/no-epoch").unwrap();
-    assert_eq!(classic.overhead_bytes(), 1 + 3 + 4 + 16, "openvpn 2.6 and earlier");
+    assert_eq!(
+        classic.overhead_bytes(),
+        1 + 3 + 4 + 16,
+        "openvpn 2.6 and earlier"
+    );
 
     let no_peer_id = OpenVpn::parse_spec("udp:1194/no-epoch/no-peer-id").unwrap();
     assert_eq!(no_peer_id.overhead_bytes(), 1 + 4 + 16);
@@ -183,11 +187,7 @@ fn the_directives_carry_the_computed_mtu_to_both_ends() {
          [[forward]]\nlisten = \"0.0.0.0:1194\"\ntarget = \"127.0.0.1:1194\"\nudp = true\n",
     );
     let text = directives(&c).expect("directives for a complete config");
-    let directive = |want: &str| {
-        text.lines()
-            .filter(|l| l.trim() == want)
-            .count()
-    };
+    let directive = |want: &str| text.lines().filter(|l| l.trim() == want).count();
     assert_eq!(directive("tun-mtu 1399"), 2, "once per end: {text}");
     assert_eq!(directive("mssfix 1399 mtu"), 2, "once per end: {text}");
     assert_eq!(
@@ -196,7 +196,10 @@ fn the_directives_carry_the_computed_mtu_to_both_ends() {
         "the control channel needs bounding too, or a small path never handshakes: {text}"
     );
     assert!(text.contains("proto udp"), "{text}");
-    assert!(text.contains("remote <the entry's public address> 1194"), "{text}");
+    assert!(
+        text.contains("remote <the entry's public address> 1194"),
+        "{text}"
+    );
     assert!(text.contains("ping -M do"), "it says how to verify: {text}");
 }
 

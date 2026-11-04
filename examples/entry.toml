@@ -1,0 +1,71 @@
+# A tunnel over wss — the ENTRY half.
+#
+# Runs on the server users reach. Pairs with examples/exit.toml, which dials
+# this one. It forwards one port, serves a SOCKS5/HTTP proxy on loopback, and
+# answers DNS.
+#
+#   rakhsh init --tunnel-addr <exit-ip>:443 --carrier wss   both halves, real keys
+#   rakhsh check -c examples/entry.toml                     read this file back
+#   rakhsh install -c /etc/rakhsh/config.toml               run it as a service
+#
+# Every key is explained in rakhsh.example.toml.
+
+# Identity. These four values are placeholders: valid base64, 32 bytes, and
+# useless — the keys do not correspond, so nothing will connect until they are
+# replaced. `rakhsh init` prints a pair that does.
+role = "entry"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="            # same on both ends
+static_secret = "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="    # this host's private key
+peer_public = "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="      # the exit's public key
+
+# The lanes. The exit dials, so this side listens.
+carrier = "wss"
+sni = "www.cloudflare.com"
+ws_path = "/live"
+ws_credential = "replace-with-a-random-string"
+tunnel_listen = "0.0.0.0:443"
+
+# Streams survive a lane dying. The exit must set this too.
+resume = true
+
+control_socket = "/run/rakhsh.sock"
+
+# Forwards come from the exit side of the tunnel: users reach this port here,
+# and the exit connects to `target` from there.
+[[forward]]
+listen = "0.0.0.0:8443"
+target = "127.0.0.1:8443"
+
+# A proxy for this host only. A non-loopback listen address would need
+# username and password.
+[[inbound]]
+tag = "proxy"
+type = "mixed"
+listen = "127.0.0.1:1080"
+
+[[outbound]]
+tag = "tunnel"
+type = "tunnel"
+
+[[outbound]]
+tag = "direct"
+type = "direct"
+
+[[outbound]]
+tag = "block"
+type = "block"
+
+[route]
+final = "tunnel"
+
+# First match wins. Everything local stays local; everything else takes the
+# tunnel by way of `final`.
+[[route.rule]]
+outbound = "direct"
+domain_suffix = [".ir"]
+ip_cidr = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]
+
+[dns]
+listen = "127.0.0.1:5353"
+local = ["1.1.1.1:53"]
+remote = ["1.1.1.1:53"]

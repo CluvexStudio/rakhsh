@@ -300,7 +300,9 @@ async fn session(base: &Config, sock: TcpStream) -> Result<()> {
                     }
                     Err(e) => {
                         write
-                            .write_all(format!("FAILED {}\n", first_line(&e.to_string())).as_bytes())
+                            .write_all(
+                                format!("FAILED {}\n", first_line(&e.to_string())).as_bytes(),
+                            )
                             .await
                             .ok();
                     }
@@ -320,7 +322,10 @@ async fn session(base: &Config, sock: TcpStream) -> Result<()> {
                     })
                     .collect::<Vec<_>>()
                     .join(",");
-                write.write_all(format!("PROTOS {body}\n").as_bytes()).await.ok();
+                write
+                    .write_all(format!("PROTOS {body}\n").as_bytes())
+                    .await
+                    .ok();
             }
             Some("DONE") | None => break,
             Some(other) => {
@@ -407,7 +412,10 @@ impl Report {
              dials\n# needs the same carriers pointed at this host.\n"
                 .to_string()
         });
-        s.push_str(&format!("carrier = \"{}\"\n", good[0].carrier));
+        let carrier = good[0].carrier.as_str();
+        let datagram = carrier.starts_with("shabdiz-");
+        let one_lane = matches!(carrier, "faketcp" | "l2tcp" | "icmp" | "spoof");
+        s.push_str(&format!("carrier = \"{carrier}\"\n"));
         s.push_str(&format!(
             "{} = \"{}\"\n",
             if dialing {
@@ -417,7 +425,36 @@ impl Report {
             },
             addr(0)
         ));
-        s.push_str("lanes = 4\n");
+        if one_lane || matches!(carrier, "shabdiz-gre" | "shabdiz-l2") {
+            s.push_str(&format!(
+                "peer_ip = \"{peer}\"\n# this carrier forges its own packets, so the far end \
+                 needs peer_ip pointed back here\n"
+            ));
+        }
+        if one_lane {
+            s.push_str(&format!("lanes = {}\n", crate::raw::RAW_LANES));
+        } else if !datagram {
+            s.push_str("lanes = 4\n");
+        }
+        if datagram {
+            s.push_str(
+                "\n# A datagram carrier replaces the lane machinery: it reads no lanes and no\n\
+                 # [[link]]s, and carries exactly one udp forward — the one below is a\n\
+                 # placeholder, so change it to what this tunnel should carry.\n\
+                 # The carriers that also held, in measured order: ",
+            );
+            let rest: Vec<&str> = good.iter().skip(1).map(|v| v.carrier.as_str()).collect();
+            s.push_str(&if rest.is_empty() {
+                "none.\n".to_string()
+            } else {
+                format!("{}.\n", rest.join(", "))
+            });
+            s.push_str(
+                "\n[[forward]]\nlisten = \"0.0.0.0:1194\"\ntarget = \"127.0.0.1:1194\"\n\
+                 udp = true\n",
+            );
+            return s;
+        }
         for (i, v) in good.iter().enumerate().skip(1) {
             s.push_str(&format!(
                 "\n[[link]]\ncarrier = \"{}\"\naddr = \"{}\"\n",
@@ -438,10 +475,7 @@ pub async fn run(base: &Config, peer: &str, port: u16, plan: Plan) -> Result<Rep
     let (read, mut write) = sock.into_split();
     let mut lines = BufReader::new(read).lines();
 
-    let hello = lines
-        .next_line()
-        .await?
-        .unwrap_or_default();
+    let hello = lines.next_line().await?.unwrap_or_default();
     if hello.trim() != CONTROL {
         bail!("{control} answered {hello:?}, which is not a rakhsh doctor");
     }

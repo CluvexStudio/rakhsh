@@ -164,6 +164,20 @@ fn a_repeated_node_name_is_refused() {
 }
 
 #[test]
+fn a_datagram_carrier_is_refused_rather_than_generated_broken() {
+    for carrier in ["shabdiz-gre", "shabdiz-l2", "shabdiz-udp", "shabdiz-tcp"] {
+        let mut s = spec(&["de=1.1.1.1"], &["ir=3.3.3.3"], Dial::Exit);
+        s.carrier = carrier.into();
+        let err = plan(&s).unwrap_err().to_string();
+        assert!(err.contains("one datagram tunnel"), "{carrier}: {err}");
+        assert!(
+            err.contains("rakhsh init"),
+            "the error says what to run: {err}"
+        );
+    }
+}
+
+#[test]
 fn a_fleet_needs_both_sides() {
     assert!(plan(&spec(&[], &["ir-a=3.3.3.3"], Dial::Exit)).is_err());
     assert!(plan(&spec(&["de=1.1.1.1"], &[], Dial::Exit)).is_err());

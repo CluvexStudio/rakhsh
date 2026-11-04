@@ -117,6 +117,16 @@ pub fn plan(spec: &Spec) -> Result<Vec<Node>> {
     if spec.exits.is_empty() || spec.entries.is_empty() {
         bail!("a fleet needs at least one exit and one entry");
     }
+    if spec.carrier.starts_with("shabdiz-") {
+        bail!(
+            "carrier {:?} carries one datagram tunnel between one pair of hosts: it reads neither \
+             the [[peer]] identities a fleet is built from nor `lanes`, and it needs a peer_ip a \
+             fleet cannot choose. Generate each tunnel on its own with `rakhsh init --carrier {} \
+             --peer-ip <far end> --forward <listen>=<target>/udp`.",
+            spec.carrier,
+            spec.carrier
+        );
+    }
     let mut names: Vec<&str> = spec
         .exits
         .iter()

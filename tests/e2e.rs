@@ -107,8 +107,15 @@ fn lanes_up(bin: &str, socket: &str, limit: Duration) -> bool {
 }
 
 fn run(bin: &str, args: &[&str]) -> String {
-    let out = Command::new(bin).args(args).output().expect("the binary runs");
-    assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .expect("the binary runs");
+    assert!(
+        out.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8(out.stdout).expect("utf-8 output")
 }
 

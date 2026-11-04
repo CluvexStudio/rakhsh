@@ -103,7 +103,65 @@ pub fn describe(cfg: &Config) -> Vec<String> {
         Ok((l, t)) => out.push(format!("  carries udp {l} -> {t}")),
         Err(e) => out.push(format!("  ERROR: {e}")),
     }
+    let ign = ignored(cfg);
+    if !ign.is_empty() {
+        out.push(format!(
+            "  WARNING: a datagram carrier replaces the lane and stream machinery, so these are \
+             not read here: {}",
+            ign.join(", ")
+        ));
+    }
     out
+}
+
+pub fn ignored(cfg: &Config) -> Vec<&'static str> {
+    let mut v = Vec::new();
+    if cfg.lanes.is_some() {
+        v.push("lanes");
+    }
+    if cfg.resume {
+        v.push("resume");
+    }
+    if !cfg.link.is_empty() {
+        v.push("[[link]]");
+    }
+    if !cfg.backup_connect.is_empty() {
+        v.push("backup_connect");
+    }
+    if !cfg.peers.is_empty() {
+        v.push("[[peer]]");
+    }
+    if !cfg.inbound.is_empty() {
+        v.push("[[inbound]]");
+    }
+    if cfg.dns.is_some() {
+        v.push("[dns]");
+    }
+    if cfg.max_connections.is_some() {
+        v.push("max_connections");
+    }
+    if cfg.mss_clamp.is_some() {
+        v.push("mss_clamp");
+    }
+    if cfg.encryption.is_some() {
+        v.push("encryption (shabdiz always encrypts)");
+    }
+    if cfg.l3_addr.is_some() {
+        v.push("l3_addr");
+    }
+    let l = &cfg.limits;
+    if l.limit.is_some()
+        || l.limit_up.is_some()
+        || l.limit_down.is_some()
+        || l.limit_per_stream.is_some()
+        || l.quota.is_some()
+    {
+        v.push("the limit and quota keys");
+    }
+    if cfg.forward.iter().any(|f| !f.udp) {
+        v.push("every [[forward]] without udp = true");
+    }
+    v
 }
 
 pub fn validate(cfg: &Config) -> Result<()> {
@@ -139,6 +197,13 @@ pub async fn run(cfg: Config) -> Result<()> {
         fwd.0,
         fwd.1
     );
+    let ign = ignored(&cfg);
+    if !ign.is_empty() {
+        warn!(
+            "a datagram carrier does not read these, so they have no effect: {}",
+            ign.join(", ")
+        );
+    }
 
     let mut backoff = Duration::from_millis(500);
     loop {

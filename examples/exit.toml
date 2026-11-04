@@ -1,0 +1,41 @@
+# A tunnel over wss — the EXIT half.
+#
+# Runs on the server with open access. Pairs with examples/entry.toml: this
+# side dials it and answers the streams it sends.
+#
+# The four carrier keys below must match the entry's byte for byte, and so must
+# token, encryption and resume. The forwards live on the entry; this side only
+# connects to their targets.
+#
+#   rakhsh check -c examples/exit.toml
+#   rakhsh install -c /etc/rakhsh/config.toml
+
+# Identity. Placeholders — see examples/entry.toml.
+role = "exit"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="            # same on both ends
+static_secret = "REREREREREREREREREREREREREREREREREREREREREQ="    # this host's private key
+peer_public = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="      # the entry's public key
+
+carrier = "wss"
+sni = "www.cloudflare.com"
+ws_path = "/live"
+ws_credential = "replace-with-a-random-string"
+
+# The entry's public address. This side dials, which is the default
+# (dial = "exit"), so it reads tunnel_connect and not tunnel_listen.
+tunnel_connect = "198.51.100.7:443"
+lanes = 4
+
+resume = true
+
+control_socket = "/run/rakhsh.sock"
+
+# If the forwards come from an x-ui panel instead of the entry's [[forward]]
+# blocks, the exit polls the panel and pushes the port list across:
+#
+# xui_panel = "https://panel.example:2053"
+# xui_token = "a-panel-session-token"
+# xui_interval = 60
+#
+# and the entry accepts the push with accept_sync = true. See
+# rakhsh.example.toml.

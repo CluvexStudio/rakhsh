@@ -111,9 +111,26 @@ listen = "127.0.0.1:1080"
 final = "tunnel"
 ```
 
-[`rakhsh.example.toml`](rakhsh.example.toml) carries every key the parser accepts, each with a
-working value. `rakhsh check` reads any config back as prose, including the parts you did not set,
-so you can see what it will do before it does it.
+[`rakhsh.example.toml`](rakhsh.example.toml) is the annotated reference: every key the parser
+accepts, exactly once, with its default, its units and which side reads it. A test fails if a key
+is missing from it, or if it names one the parser does not read.
+
+[`examples/`](examples) holds configs to start from instead — a working pair per shape, each one
+checked by the same test:
+
+| | |
+|---|---|
+| [`entry.toml`](examples/entry.toml) + [`exit.toml`](examples/exit.toml) | a tunnel over wss, with a forward, a proxy and a resolver |
+| [`openvpn-entry.toml`](examples/openvpn-entry.toml) + [`openvpn-exit.toml`](examples/openvpn-exit.toml) | OpenVPN over a datagram carrier |
+| [`l3-entry.toml`](examples/l3-entry.toml) + [`l3-exit.toml`](examples/l3-exit.toml) | a routed tun device instead of forwards |
+| [`raw-entry.toml`](examples/raw-entry.toml) + [`raw-exit.toml`](examples/raw-exit.toml) | forged TCP packets |
+| [`node.toml`](examples/node.toml) | a proxy and router on one host, no tunnel |
+
+Their identity values are obvious placeholders; `rakhsh init` writes keys that correspond.
+
+`rakhsh check` reads any config back as prose, including the parts you did not set, and says when a
+key you did set is one this configuration never reads — so a line that does nothing says so instead
+of looking configured.
 
 ## More
 

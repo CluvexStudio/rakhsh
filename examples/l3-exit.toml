@@ -1,0 +1,31 @@
+# A routed tunnel (layer 3) — the EXIT half.
+#
+# Pairs with examples/l3-entry.toml and dials it. l3_addr, l3_auto_mtu and the
+# carrier must agree with that half, or the two devices end up with different
+# MTUs and large packets vanish.
+#
+#   rakhsh check -c examples/l3-exit.toml
+#
+# Needs CAP_NET_ADMIN. To let the entry's traffic out of this host:
+#
+#   sysctl -w net.ipv4.ip_forward=1
+#   iptables -t nat -A POSTROUTING -s 10.77.0.0/30 -o eth0 -j MASQUERADE
+
+# Identity. Placeholders — see examples/entry.toml.
+role = "exit"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="
+static_secret = "REREREREREREREREREREREREREREREREREREREREREQ="
+peer_public = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
+
+carrier = "tls"
+sni = "www.cloudflare.com"
+tunnel_connect = "198.51.100.7:443"
+lanes = 4
+
+# The other address in the entry's /30.
+l3_addr = "10.77.0.2/30"
+l3_auto_mtu = true
+mss_clamp = 1300
+l3_paths = 1
+
+control_socket = "/run/rakhsh-l3.sock"

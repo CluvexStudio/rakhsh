@@ -50,13 +50,7 @@ pub fn setup(cfg: &Config) -> Result<Option<Arc<L3>>> {
     };
     let addrs = parse_addrs(addr_cidr)?;
     let gre = cfg.l3_gre.unwrap_or(false);
-    let mtu = if cfg.l3_auto_mtu.unwrap_or(false) {
-        let kinds = std::iter::once(cfg.carrier.as_deref().unwrap_or("tcp"))
-            .chain(cfg.link.iter().map(|l| l.carrier.as_str()));
-        kinds.map(|k| auto_mtu(k, gre)).min().unwrap_or(1380)
-    } else {
-        cfg.l3_mtu.unwrap_or(1380)
-    };
+    let mtu = planned_mtu(cfg);
 
     let mut b = tun_rs::DeviceBuilder::new().mtu(mtu);
     for (ip, prefix) in &addrs {
@@ -122,6 +116,64 @@ fn run(args: &[&str]) {
     let _ = std::process::Command::new(args[0])
         .args(&args[1..])
         .status();
+}
+
+pub fn planned_mtu(cfg: &Config) -> u16 {
+    let gre = cfg.l3_gre.unwrap_or(false);
+    if cfg.l3_auto_mtu.unwrap_or(false) {
+        let kinds = std::iter::once(cfg.carrier.as_deref().unwrap_or("tcp"))
+            .chain(cfg.link.iter().map(|l| l.carrier.as_str()));
+        kinds.map(|k| auto_mtu(k, gre)).min().unwrap_or(1380)
+    } else {
+        cfg.l3_mtu.unwrap_or(1380)
+    }
+}
+
+pub fn describe(cfg: &Config) -> Result<Vec<String>> {
+    let Some(addr_cidr) = cfg.l3_addr.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let addrs = parse_addrs(addr_cidr)?;
+    let list: Vec<String> = addrs.iter().map(|(ip, p)| format!("{ip}/{p}")).collect();
+    let mtu = planned_mtu(cfg);
+    let gre = cfg.l3_gre.unwrap_or(false);
+    let mut out = vec![format!(
+        "layer 3: a tun device on {}, mtu {mtu} ({}), instead of forwarded ports",
+        list.join(", "),
+        if cfg.l3_auto_mtu.unwrap_or(false) {
+            "from the carrier, because l3_auto_mtu is on"
+        } else {
+            "l3_mtu"
+        }
+    )];
+    out.push(
+        "  needs CAP_NET_ADMIN. The kernel names the device; routes through it are yours to add"
+            .to_string(),
+    );
+    if gre {
+        out.push(format!(
+            "  wrapped in gre, key {} — the other end must match",
+            cfg.gre_key.unwrap_or(0)
+        ));
+    }
+    match cfg.l3_paths {
+        Some(1) => out.push("  one lane at a time, so packets stay in order".to_string()),
+        Some(n) => out.push(format!("  spread over up to {n} lanes")),
+        None => out.push("  spread over every live lane".to_string()),
+    }
+    if let Some(mss) = cfg.mss_clamp {
+        let room = mtu.saturating_sub(40);
+        out.push(format!(
+            "  inner TCP mss clamped to {mss}, against {room} of room in a {mtu}-byte packet"
+        ));
+        if mss > room {
+            out.push(format!(
+                "  WARNING: mss_clamp = {mss} is above the {room} this mtu leaves, so the clamp \
+                 permits segments the device will drop — set mss_clamp = {room} or lower"
+            ));
+        }
+    }
+    Ok(out)
 }
 
 fn auto_mtu(carrier: &str, gre: bool) -> u16 {

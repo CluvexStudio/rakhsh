@@ -1,0 +1,45 @@
+# OpenVPN over a datagram carrier — the EXIT half.
+#
+# Runs on the server the OpenVPN daemon runs on. Pairs with
+# examples/openvpn-entry.toml, and opens the flow towards it.
+#
+# Both halves carry the same [[forward]] and the same [openvpn] block: the
+# forward because each end needs to know what it is carrying, and the openvpn
+# block so `rakhsh openvpn -c` prints the same directives from either side.
+#
+#   rakhsh check   -c examples/openvpn-exit.toml
+#   rakhsh openvpn -c examples/openvpn-exit.toml
+#
+# Needs root (CAP_NET_RAW).
+
+# Identity. Placeholders — see examples/entry.toml.
+role = "exit"
+token = "ERERERERERERERERERERERERERERERERERERERERERE="
+static_secret = "REREREREREREREREREREREREREREREREREREREREREQ="
+peer_public = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
+
+carrier = "shabdiz-gre"
+
+# The entry's address.
+peer_ip = "198.51.100.7"
+
+# This side opens the flow.
+dial = "exit"
+
+pace_burst = 2
+pace_auto = true
+
+control_socket = "/run/rakhsh-ovpn.sock"
+
+[[forward]]
+listen = "0.0.0.0:1194"
+target = "127.0.0.1:1194"
+udp = true
+
+[openvpn]
+proto = "udp"
+port = 1194
+device = "tun"
+crypto = "aead"
+epoch = true
+server = "127.0.0.1:1194"
