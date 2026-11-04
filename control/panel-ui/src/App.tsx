@@ -1,6 +1,6 @@
 import * as React from "react"
 import { HIST, LANEHIST, login, useFleet } from "@/lib/api"
-import { Sidebar, Topbar, type ViewId } from "@/components/app"
+import { Sidebar, Topbar, useTheme, type ViewId } from "@/components/app"
 import { dur } from "@/lib/utils"
 import { Lanes, Login, Logs, Overview, Security, Settings, Traffic } from "@/views"
 
@@ -12,6 +12,7 @@ interface Toast {
 
 export default function App() {
   const fleet = useFleet(2000)
+  const [theme, setTheme] = useTheme()
   const [view, setView] = React.useState<ViewId>("overview")
   const [cur, setCur] = React.useState(0)
   const [open, setOpen] = React.useState(false)
@@ -73,17 +74,19 @@ export default function App() {
         open={open}
         onClose={() => setOpen(false)}
       />
-      <div className="lg:pl-[248px]">
+      <div className="lg:pl-[252px]">
         <Topbar
           title={titles[view]}
           sub={sub}
           updatedAt={fleet.updatedAt}
           onRefresh={fleet.refresh}
           onMenu={() => setOpen(true)}
+          theme={theme}
+          setTheme={setTheme}
         />
         <main className="mx-auto max-w-[1400px] p-4 sm:p-6">
           {!n ? (
-            <div className="grid place-items-center py-32 text-sm text-muted-foreground">
+            <div className="grid place-items-center py-32 text-center font-mono text-[12px] uppercase tracking-[0.1em] text-muted-foreground">
               {fleet.error ? `cannot reach the control center — ${fleet.error}` : "connecting to the fleet…"}
             </div>
           ) : view === "overview" ? (
@@ -106,10 +109,10 @@ export default function App() {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="flex items-center gap-2 rounded-lg border bg-popover/95 px-3.5 py-2.5 text-sm shadow-xl backdrop-blur"
-            style={{ borderColor: t.ok ? "color-mix(in oklch, var(--good) 35%, transparent)" : "color-mix(in oklch, var(--bad) 35%, transparent)" }}
+            className={`nb flex items-center gap-2 px-3.5 py-2.5 font-mono text-[12px] font-bold ${
+              t.ok ? "bg-[var(--fill-green)] text-[var(--on-fill)]" : "bg-[var(--fill-red)] text-[#f8f4ec]"
+            }`}
           >
-            <span className="size-1.5 rounded-full" style={{ background: t.ok ? "var(--good)" : "var(--bad)" }} />
             {t.msg}
           </div>
         ))}

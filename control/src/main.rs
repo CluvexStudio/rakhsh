@@ -20,7 +20,7 @@ mod bot;
 mod fetch;
 
 const PANEL: &str = include_str!("../assets/panel.html");
-const MANIFEST: &str = r##"{"name":"rakhsh Control Center","short_name":"rakhsh","start_url":"/","display":"standalone","background_color":"#0d0f14","theme_color":"#0d0f14","icons":[]}"##;
+const MANIFEST: &str = r##"{"name":"rakhsh Control Center","short_name":"rakhsh","start_url":"/","display":"standalone","background_color":"#121212","theme_color":"#121212","icons":[]}"##;
 const SAMPLE: &str = include_str!("../control.sample.toml");
 
 #[derive(Parser)]

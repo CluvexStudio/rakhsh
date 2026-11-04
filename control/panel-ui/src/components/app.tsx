@@ -5,30 +5,33 @@ import {
   ArrowUp,
   CircleCheck,
   Gauge,
-  Layers,
   type LucideIcon,
   Menu,
   Minus,
+  Moon,
   RefreshCw,
   Route,
   ScrollText,
   Settings2,
   Shield,
+  Sun,
   TriangleAlert,
+  X,
+  Zap,
 } from "lucide-react"
 import type { Lane, Node } from "@/lib/api"
 import { cn, mbit, unit } from "@/lib/utils"
-import { Badge, Card } from "@/components/ui"
+import { Badge, Button, Card, Corner, IconTile, type Tone } from "@/components/ui"
 import { Sparkline } from "@/components/charts"
 
 export type ViewId = "overview" | "lanes" | "traffic" | "security" | "logs" | "settings"
-export const VIEWS: { id: ViewId; label: string; icon: LucideIcon }[] = [
-  { id: "overview", label: "Overview", icon: Gauge },
-  { id: "lanes", label: "Lanes", icon: Route },
-  { id: "traffic", label: "Traffic", icon: Activity },
-  { id: "security", label: "Security", icon: Shield },
-  { id: "logs", label: "Logs", icon: ScrollText },
-  { id: "settings", label: "Settings", icon: Settings2 },
+export const VIEWS: { id: ViewId; label: string; icon: LucideIcon; tone: Tone }[] = [
+  { id: "overview", label: "Overview", icon: Gauge, tone: "blue" },
+  { id: "lanes", label: "Lanes", icon: Route, tone: "yellow" },
+  { id: "traffic", label: "Traffic", icon: Activity, tone: "green" },
+  { id: "security", label: "Security", icon: Shield, tone: "red" },
+  { id: "logs", label: "Logs", icon: ScrollText, tone: "plain" },
+  { id: "settings", label: "Settings", icon: Settings2, tone: "plain" },
 ]
 
 export type Health = "good" | "warn" | "bad"
@@ -39,14 +42,50 @@ export function health(n: Node): Health {
   return "good"
 }
 export const healthColor = (h: Health) =>
-  h === "bad" ? "var(--bad)" : h === "warn" ? "var(--warn)" : "var(--good)"
+  h === "bad" ? "var(--fill-red)" : h === "warn" ? "var(--fill-yellow)" : "var(--fill-green)"
 
-export function Dot({ color, size = 9 }: { color: string; size?: number }) {
+/** A square chip, not a glowing dot — the theme has no soft edges. */
+export function Dot({ color, size = 10 }: { color: string; size?: number }) {
   return (
     <span
-      className="inline-block rounded-full shrink-0"
-      style={{ width: size, height: size, background: color, boxShadow: `0 0 10px ${color}` }}
+      className="inline-block shrink-0 border-2 border-[var(--ink)]"
+      style={{ width: size + 4, height: size + 4, background: color }}
     />
+  )
+}
+
+/* ---------------- theme ---------------- */
+export type Theme = "light" | "dark"
+const KEY = "rakhsh-theme"
+
+export function useTheme(): [Theme, (t: Theme) => void] {
+  const [theme, set] = React.useState<Theme>(() =>
+    (localStorage.getItem(KEY) as Theme) || (document.documentElement.classList.contains("dark") ? "dark" : "light")
+  )
+  React.useEffect(() => {
+    const root = document.documentElement
+    root.classList.toggle("dark", theme === "dark")
+    root.style.colorScheme = theme
+    localStorage.setItem(KEY, theme)
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", theme === "dark" ? "#121212" : "#e7e2d6")
+  }, [theme])
+  return [theme, set]
+}
+
+export function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
+  return (
+    <button
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      aria-label={theme === "dark" ? "Switch to light" : "Switch to dark"}
+      className={cn(
+        "nb-sm nb-press grid size-9 place-items-center [&>svg]:size-4 [&>svg]:stroke-[2.5]",
+        theme === "dark" ? "bg-[var(--fill-yellow)] text-[var(--on-fill)]" : "bg-[var(--fill-red)] text-[#f8f4ec]"
+      )}
+    >
+      {theme === "dark" ? <Sun /> : <Moon />}
+    </button>
   )
 }
 
@@ -56,10 +95,14 @@ export function TrendBadge({ value }: { value: number | null }) {
   const up = value > 4
   const dn = value < -4
   const Icon = up ? ArrowUp : dn ? ArrowDown : Minus
-  const color = up ? "var(--chart-2)" : dn ? "var(--bad)" : "var(--muted-foreground)"
   return (
-    <span className="ml-auto inline-flex items-center gap-0.5 text-[11px] font-medium tabular" style={{ color }}>
-      <Icon className="size-3" />
+    <span
+      className={cn(
+        "ml-auto inline-flex items-center gap-0.5 border-2 border-[var(--ink)] px-1.5 py-px font-mono text-[10px] font-bold tabular",
+        up ? "bg-[var(--fill-green)] text-[var(--on-fill)]" : dn ? "bg-[var(--fill-red)] text-[#f8f4ec]" : "bg-[var(--surface-2)]"
+      )}
+    >
+      <Icon className="size-3 stroke-[3]" />
       {Math.abs(value).toFixed(0)}%
     </span>
   )
@@ -72,7 +115,8 @@ export function Kpi({
   value,
   u,
   sub,
-  color = "var(--chart-1)",
+  tone = "ink",
+  color = "var(--blue)",
   spark,
   trend,
 }: {
@@ -81,32 +125,34 @@ export function Kpi({
   value: React.ReactNode
   u?: string
   sub?: React.ReactNode
+  tone?: Tone
   color?: string
   spark?: number[]
   trend?: number | null
 }) {
   return (
     <Card className="flex flex-col overflow-hidden">
-      <div className="flex flex-col gap-3 p-4 pb-2">
+      <div className="flex flex-col gap-3 p-3.5 pb-2">
         <div className="flex items-center gap-2.5">
-          <span
-            className="grid size-7 place-items-center rounded-lg [&>svg]:size-4"
-            style={{ background: `color-mix(in oklch, ${color} 16%, transparent)`, color }}
-          >
+          <IconTile tone={tone} size="sm">
             <Icon />
-          </span>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+          </IconTile>
+          <span className="font-mono text-[11px] font-bold uppercase tracking-[0.06em] text-muted-foreground">
             {label}
           </span>
           {trend !== undefined ? <TrendBadge value={trend ?? null} /> : null}
         </div>
-        <div>
-          <span className="tabular text-[28px] font-semibold leading-none tracking-tight">{value}</span>
-          {u ? <span className="ml-1.5 text-sm font-medium text-muted-foreground">{u}</span> : null}
+        <div className="truncate">
+          <span className="tabular text-[30px] font-extrabold leading-none tracking-tight">{value}</span>
+          {u ? <span className="ml-1.5 font-mono text-xs font-bold text-muted-foreground">{u}</span> : null}
         </div>
-        <div className="text-[11.5px] text-muted-foreground">{sub}</div>
+        <div className="truncate font-mono text-[11px] text-muted-foreground">{sub}</div>
       </div>
-      <div className="h-10 px-1">{spark ? <Sparkline data={spark} color={color} height={40} /> : null}</div>
+      {spark ? (
+        <div className="mt-auto h-10 border-t-[var(--b)] border-[var(--ink)] bg-[var(--surface-2)]">
+          <Sparkline data={spark} color={color} height={40} />
+        </div>
+      ) : null}
     </Card>
   )
 }
@@ -124,16 +170,26 @@ export function Pill({
   warn: number
 }) {
   if (value == null)
-    return <span className="inline-flex rounded-md border border-[var(--border-strong)] px-2 py-0.5 text-xs text-muted-foreground">—</span>
-  const tone = value >= warn ? "bad" : value >= good ? "warn" : ("good" as const)
-  const color = tone === "bad" ? "var(--bad)" : tone === "warn" ? "var(--warn)" : "var(--good)"
-  const Icon = tone === "good" ? CircleCheck : TriangleAlert
+    return (
+      <span className="inline-flex border-2 border-[var(--ink)] px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+        —
+      </span>
+    )
+  const bad = value >= warn
+  const mid = !bad && value >= good
+  const Icon = bad || mid ? TriangleAlert : CircleCheck
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium tabular"
-      style={{ borderColor: `color-mix(in oklch, ${color} 28%, transparent)`, background: `color-mix(in oklch, ${color} 12%, transparent)`, color }}
+      className={cn(
+        "inline-flex items-center gap-1 border-2 border-[var(--ink)] px-2 py-0.5 font-mono text-[11px] font-bold tabular",
+        bad
+          ? "bg-[var(--fill-red)] text-[#f8f4ec]"
+          : mid
+            ? "bg-[var(--fill-yellow)] text-[var(--on-fill)]"
+            : "bg-[var(--fill-green)] text-[var(--on-fill)]"
+      )}
     >
-      <Icon className="size-3" />
+      <Icon className="size-3 stroke-[2.5]" />
       {value.toFixed(1)}
       {u}
     </span>
@@ -163,26 +219,29 @@ export function Sidebar({
   const online = nodes.filter((n) => !n.offline).length
   return (
     <>
-      {open ? <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={onClose} /> : null}
+      {open ? <div className="fixed inset-0 z-30 bg-[var(--ink)]/60 lg:hidden" onClick={onClose} /> : null}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-[248px] flex-col border-r border-border bg-background/80 backdrop-blur-xl transition-transform lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex w-[252px] flex-col border-r-[var(--b)] border-[var(--ink)] bg-[var(--surface)] transition-transform lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex items-center gap-2.5 px-5 h-16 border-b border-border/70">
-          <span className="grid size-8 place-items-center rounded-lg bg-primary/15 text-primary [&>svg]:size-[18px]">
-            <Gauge />
-          </span>
-          <div>
-            <div className="text-[15px] font-semibold leading-none tracking-tight">rakhsh</div>
-            <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground mt-1">
+        <div className="flex h-16 items-center gap-2.5 border-b-[var(--b)] border-[var(--ink)] px-4">
+          <IconTile tone="red">
+            <Zap />
+          </IconTile>
+          <div className="min-w-0">
+            <div className="font-mono text-[15px] font-extrabold leading-none tracking-tight">rakhsh</div>
+            <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
               Control Center
             </div>
           </div>
+          <button className="ml-auto lg:hidden [&>svg]:size-5 [&>svg]:stroke-[2.5]" onClick={onClose} aria-label="Close menu">
+            <X />
+          </button>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
+        <nav className="flex-1 space-y-2 overflow-y-auto p-3">
           {VIEWS.map((v) => {
             const active = v.id === view
             const Icon = v.icon
@@ -195,53 +254,51 @@ export function Sidebar({
                   onClose()
                 }}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors [&>svg]:size-[17px]",
+                  "nb-press flex w-full items-center gap-2.5 border-[var(--b)] px-2.5 py-2 text-left font-mono text-[12px] font-bold uppercase tracking-[0.05em]",
+                  "[&>svg]:size-[17px] [&>svg]:shrink-0 [&>svg]:stroke-[2.5]",
                   active
-                    ? "bg-primary/12 text-foreground ring-1 ring-primary/25"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--on-ink)] shadow-[4px_4px_0_0_var(--ink)]"
+                    : "border-transparent text-muted-foreground hover:border-[var(--ink)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
                 )}
               >
-                <Icon className={active ? "text-primary" : ""} />
+                <Icon />
                 {v.label}
-                {badge != null ? (
-                  <span className="ml-auto text-[11px] text-muted-foreground tabular">{badge}</span>
-                ) : null}
+                {badge != null ? <span className="ml-auto tabular text-[11px]">{badge}</span> : null}
               </button>
             )
           })}
         </nav>
 
-        <div className="p-3 border-t border-border/70">
-          <div className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Fleet
+        <div className="border-t-[var(--b)] border-[var(--ink)] p-3">
+          <div className="px-0.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+            Fleet · {nodes.length} nodes · {online} online
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             {nodes.map((n, i) => (
               <button
                 key={n.name}
                 onClick={() => setCur(i)}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors",
-                  i === cur ? "bg-accent/50 ring-1 ring-border-strong" : "hover:bg-accent/40"
+                  "nb-press flex w-full items-center gap-2.5 border-[var(--b)] px-2 py-1.5 text-left",
+                  i === cur
+                    ? "border-[var(--ink)] bg-[var(--surface-2)] shadow-[3px_3px_0_0_var(--ink)]"
+                    : "border-transparent hover:border-[var(--ink)]"
                 )}
               >
-                <Dot color={healthColor(health(n))} />
+                <Dot color={healthColor(health(n))} size={8} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium">{n.name}</div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <div className="truncate font-mono text-[12px] font-bold">{n.name}</div>
+                  <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
                     {n.offline ? "offline" : n.role}
                   </div>
                 </div>
                 {!n.offline ? (
-                  <div className="w-12 h-6 opacity-80">
-                    <Sparkline data={(hist[n.name]?.down || []).slice(-20)} color="var(--chart-1)" height={24} />
+                  <div className="h-6 w-12 shrink-0">
+                    <Sparkline data={(hist[n.name]?.down || []).slice(-20)} color="var(--blue)" height={24} />
                   </div>
                 ) : null}
               </button>
             ))}
-          </div>
-          <div className="px-2 pt-3 text-[11px] text-muted-foreground">
-            {nodes.length} nodes · {online} online
           </div>
         </div>
       </aside>
@@ -256,12 +313,16 @@ export function Topbar({
   updatedAt,
   onRefresh,
   onMenu,
+  theme,
+  setTheme,
 }: {
   title: string
   sub?: React.ReactNode
   updatedAt: number
   onRefresh: () => void
   onMenu: () => void
+  theme: Theme
+  setTheme: (t: Theme) => void
 }) {
   const [, force] = React.useState(0)
   React.useEffect(() => {
@@ -270,25 +331,32 @@ export function Topbar({
   }, [])
   const ago = updatedAt ? Math.max(0, Math.round((Date.now() - updatedAt) / 1000)) : null
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border/70 bg-background/70 px-4 backdrop-blur-xl sm:px-6">
-      <button className="lg:hidden text-muted-foreground [&>svg]:size-5" onClick={onMenu}>
+    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b-[var(--b)] border-[var(--ink)] bg-[var(--surface)] px-3 sm:px-5">
+      <button
+        className="nb-flat nb-press grid size-9 place-items-center lg:hidden [&>svg]:size-5 [&>svg]:stroke-[2.5]"
+        onClick={onMenu}
+        aria-label="Open menu"
+      >
         <Menu />
       </button>
       <div className="min-w-0">
-        <h1 className="text-lg font-semibold leading-none tracking-tight">{title}</h1>
-        {sub ? <div className="mt-1 truncate text-xs text-muted-foreground">{sub}</div> : null}
+        <h1 className="truncate font-mono text-[19px] font-extrabold uppercase leading-none tracking-[0.02em]">
+          {title}
+        </h1>
+        {sub ? <div className="mt-1.5 truncate font-mono text-[11px] text-muted-foreground">{sub}</div> : null}
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <Badge tone="outline" className="gap-1.5">
-          <span className="size-1.5 rounded-full bg-[var(--good)]" />
-          {ago == null ? "—" : ago < 2 ? "updated just now" : `updated ${ago}s ago`}
+        <Badge tone="outline" className="hidden sm:inline-flex">
+          <span
+            className="size-2 border border-[var(--ink)]"
+            style={{ background: ago != null && ago < 6 ? "var(--fill-green)" : "var(--fill-yellow)" }}
+          />
+          {ago == null ? "—" : ago < 2 ? "live" : `${ago}s ago`}
         </Badge>
-        <button
-          onClick={onRefresh}
-          className="grid size-9 place-items-center rounded-lg border text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground [&>svg]:size-4"
-        >
+        <Button variant="secondary" size="icon" onClick={onRefresh} aria-label="Refresh">
           <RefreshCw />
-        </button>
+        </Button>
+        <ThemeToggle theme={theme} setTheme={setTheme} />
       </div>
     </header>
   )
@@ -297,34 +365,35 @@ export function Topbar({
 /* ---------------- node header (hero) ---------------- */
 export function NodeHeader({ n, right }: { n: Node; right?: React.ReactNode }) {
   return (
-    <Card className="flex flex-wrap items-center gap-x-5 gap-y-3 p-5">
-      <Dot color={healthColor(health(n))} size={12} />
-      <div className="min-w-0">
-        <div className="text-xl font-semibold leading-tight tracking-tight">{n.name || n.host}</div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <Badge tone="primary" className="uppercase tracking-wide">
-            {n.role}
-          </Badge>
-          <span className="tabular">{n.host}</span>
-          <span>·</span>
-          <span>
-            up <b className="tabular font-medium text-foreground/80">{durShort(n.uptime_secs)}</b>
-          </span>
-          <span>·</span>
-          <span className="tabular">PID {n.pid}</span>
-          <span>·</span>
-          <span className="tabular">v{n.version}</span>
+    <Card className="overflow-hidden">
+      <span className="hidden sm:block">
+        <Corner tone="blue" size={104} />
+      </span>
+      <div className="relative flex flex-wrap items-center gap-x-5 gap-y-3 p-4">
+        <Dot color={healthColor(health(n))} size={14} />
+        <div className="min-w-0">
+          <div className="font-mono text-[26px] font-extrabold leading-none tracking-tight">
+            {n.name || n.host}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[11px] text-muted-foreground">
+            <span className="tabular">{n.host}</span>
+            <span>·</span>
+            <span>
+              up <b className="tabular text-[var(--ink)]">{durShort(n.uptime_secs)}</b>
+            </span>
+            <span>·</span>
+            <span className="tabular">PID {n.pid}</span>
+            <span>·</span>
+            <span className="tabular">v{n.version}</span>
+          </div>
         </div>
-      </div>
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {n.encryption === "full" ? (
-          <Badge tone="good">AES-256-GCM</Badge>
-        ) : (
-          <Badge tone="warn">plaintext</Badge>
-        )}
-        {n.resume ? <Badge tone="secondary">resume</Badge> : null}
-        <Badge tone="secondary">{n.carrier}</Badge>
-        {right}
+        <div className="ml-auto flex flex-wrap items-center gap-2 pr-0 sm:pr-[104px]">
+          <Badge tone="primary">{n.role}</Badge>
+          <Badge tone="secondary">{n.carrier}</Badge>
+          {n.encryption === "full" ? <Badge tone="good">AES-256-GCM</Badge> : <Badge tone="bad">plaintext</Badge>}
+          {n.resume ? <Badge tone="secondary">resume</Badge> : null}
+          {right}
+        </div>
       </div>
     </Card>
   )
@@ -356,19 +425,19 @@ export function FleetStrip({
         <button
           key={n.name}
           onClick={() => onPick(i)}
-          className="flex items-center gap-3 rounded-xl border bg-card/60 p-3.5 text-left transition-colors hover:border-border-strong hover:bg-accent/30"
+          className="nb-sm nb-press flex items-center gap-3 bg-[var(--surface-2)] p-3 text-left"
         >
           <Dot color={healthColor(health(n))} />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13.5px] font-medium">{n.name}</div>
-            <div className="truncate text-[11px] text-muted-foreground tabular">
+            <div className="truncate font-mono text-[13px] font-bold">{n.name}</div>
+            <div className="truncate font-mono text-[10px] tabular text-muted-foreground">
               {n.offline
                 ? "offline"
                 : `${n.role} · ↓${mbit(n.rx_bps)} ↑${mbit(n.tx_bps)} ${unit(n.rx_bps)} · ${n.lanes_up}L`}
             </div>
           </div>
           <div className="h-7 w-16 shrink-0">
-            <Sparkline data={(hist[n.name]?.down || []).slice(-24)} color="var(--chart-1)" height={28} />
+            <Sparkline data={(hist[n.name]?.down || []).slice(-24)} color="var(--blue)" height={28} />
           </div>
         </button>
       ))}
