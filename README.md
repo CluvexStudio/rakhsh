@@ -18,7 +18,7 @@ tunnel, the far end, or a whole fleet of each.
 ## How it is laid out
 
 <p align="center">
-  <img src="assets/topology.webp" alt="rakhsh topology: devices reach an entry inside the filtered network, four lanes on different carriers cross the filter to an exit on the open internet, and a blocked carrier costs one lane rather than the tunnel" width="980">
+  <img src="assets/topology.webp" alt="rakhsh topology: devices reach an entry inside the filtered network, four lanes on different carriers cross the filter to an exit on the open internet, and losing one carrier leaves the rest carrying the traffic" width="980">
 </p>
 
 ## What happens to a request
