@@ -289,6 +289,84 @@ fn check_refuses_a_forward_that_is_not_an_address() {
 }
 
 #[test]
+fn a_top_level_key_written_after_a_table_is_refused() {
+    // TOML gives the key to the table above it, where it would do nothing.
+    for (body, where_) in [
+        (
+            "\n[route]\nfinal = \"direct\"\ncontrol_socket = \"/run/x.sock\"\n",
+            "route",
+        ),
+        (
+            "\n[[forward]]\nlisten = \"0.0.0.0:443\"\ntarget = \"127.0.0.1:8443\"\nlanes = 4\n",
+            "forward",
+        ),
+        (
+            "\n[[inbound]]\ntype = \"socks\"\nlisten = \"127.0.0.1:1080\"\nresume_grace = 30\n",
+            "inbound",
+        ),
+        (
+            "\n[dns]\nlisten = \"127.0.0.1:53\"\nmss_clamp = 1380\n",
+            "dns",
+        ),
+    ] {
+        let path = config(body);
+        let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);
+        assert!(!ok, "a stray key in [{where_}] must be refused: {said}");
+        assert!(
+            said.contains("unknown field"),
+            "and the error must name it: {said}"
+        );
+    }
+}
+
+#[test]
+fn the_strict_table_key_lists_match_the_structs() {
+    // The [[inbound]]/[[forward]] check keeps its own key list, because serde
+    // cannot deny unknown fields next to a flattened struct. Keep them in step.
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/config.rs"))
+        .expect("config.rs is readable");
+    let fields = |name: &str| -> Vec<String> {
+        let start = src.find(&format!("pub struct {name} {{")).expect(name);
+        let body = &src[start..start + src[start..].find("\n}").expect("struct end")];
+        body.lines()
+            .filter_map(|l| l.trim().strip_prefix("pub "))
+            .filter_map(|l| l.split(':').next())
+            .filter(|n| !n.contains(' ') && *n != "limits")
+            .map(|n| {
+                if n == "kind" {
+                    "type".into()
+                } else {
+                    n.to_string()
+                }
+            })
+            .collect()
+    };
+    for (name, list) in [
+        ("Inbound", rakhsh_keys("INBOUND_KEYS", &src)),
+        ("Forward", rakhsh_keys("FORWARD_KEYS", &src)),
+        ("Limits", rakhsh_keys("LIMIT_KEYS", &src)),
+    ] {
+        let mut want = fields(name);
+        want.sort();
+        let mut got = list;
+        got.sort();
+        assert_eq!(got, want, "{name} and its key list disagree");
+    }
+}
+
+fn rakhsh_keys(konst: &str, src: &str) -> Vec<String> {
+    let start = src.find(&format!("pub const {konst}")).expect(konst);
+    let body = &src[start..start + src[start..].find("];").expect("list end")];
+    body.match_indices('"')
+        .step_by(2)
+        .map(|(i, _)| {
+            let rest = &body[i + 1..];
+            rest[..rest.find('"').unwrap()].to_string()
+        })
+        .collect()
+}
+
+#[test]
 fn a_sync_listen_with_a_port_is_refused_before_it_fails_to_bind() {
     let path = config("accept_sync = true\nsync_listen = \"127.0.0.1:7777\"\n");
     let (ok, said) = rakhsh(&["check", "-c", &path.display().to_string()]);

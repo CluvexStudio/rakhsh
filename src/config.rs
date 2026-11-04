@@ -135,6 +135,7 @@ pub struct Inbound {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Outbound {
     pub tag: String,
     #[serde(rename = "type")]
@@ -145,6 +146,7 @@ pub struct Outbound {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Route {
     #[serde(rename = "final")]
     pub fallback: Option<String>,
@@ -154,6 +156,7 @@ pub struct Route {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub outbound: String,
     #[serde(default)]
@@ -194,6 +197,7 @@ pub struct Forward {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DnsCfg {
     pub listen: String,
     #[serde(default)]
@@ -251,6 +255,7 @@ impl Config {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config {}", path.display()))?;
         let mut cfg: Config = toml::from_str(&text).context("parsing config TOML")?;
+        strict_tables(&text)?;
         cfg.source = Some(path.to_path_buf());
         match cfg.role.as_str() {
             "entry" | "exit" => {
@@ -363,6 +368,45 @@ pub struct Tuning {
     pub keepalive: u64,
     pub rcvbuf: Option<usize>,
     pub sndbuf: Option<usize>,
+}
+
+pub const LIMIT_KEYS: &[&str] = &[
+    "limit",
+    "limit_up",
+    "limit_down",
+    "limit_per_stream",
+    "quota",
+    "quota_period",
+];
+pub const INBOUND_KEYS: &[&str] = &["tag", "type", "listen", "username", "password"];
+pub const FORWARD_KEYS: &[&str] = &["listen", "target", "udp", "proxy_protocol"];
+
+/// `[[inbound]]` and `[[forward]]` flatten their limits, and serde will not let a
+/// flattened struct deny unknown fields. Without this, a top-level key written
+/// after one of those tables belongs to it, is ignored, and silently does nothing.
+fn strict_tables(text: &str) -> Result<()> {
+    let doc: toml::Value = toml::from_str(text).context("parsing config TOML")?;
+    for (table, own) in [("inbound", INBOUND_KEYS), ("forward", FORWARD_KEYS)] {
+        let Some(entries) = doc.get(table).and_then(toml::Value::as_array) else {
+            continue;
+        };
+        for (i, entry) in entries.iter().enumerate() {
+            let Some(map) = entry.as_table() else {
+                continue;
+            };
+            for key in map.keys() {
+                if !own.contains(&key.as_str()) && !LIMIT_KEYS.contains(&key.as_str()) {
+                    bail!(
+                        "[[{table}]] #{}: unknown field `{key}`. A key written after a table \
+                         belongs to it — if this is a top-level key, move it above the first \
+                         [table] in the file",
+                        i + 1
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn decode32(s: &str) -> Result<[u8; 32]> {

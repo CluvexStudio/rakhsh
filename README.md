@@ -51,6 +51,22 @@ key derived from the token, then AES-256-GCM on every record.
 
 ## Install
 
+One line on a bare server — it fetches the binaries, asks a handful of questions, writes the
+config, installs the service, and hands you a link for the other end:
+
+```
+bash <(curl -fsSL https://raw.githubusercontent.com/CluvexStudio/rakhsh/main/install.sh)
+```
+
+On the second server there is nothing to answer at all — paste the line the first one printed:
+
+```
+bash <(curl -fsSL .../install.sh) --join rakhsh://…
+```
+
+`--panel` sets up the web panel and prints its generated username and password. `--help` lists
+the rest. Or build it yourself:
+
 ```
 cargo build --release
 sudo install -m755 target/release/rakhsh /usr/local/bin/rakhsh

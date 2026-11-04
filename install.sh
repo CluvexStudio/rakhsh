@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # rakhsh — interactive installer / control panel.
 # Set up either end of the tunnel, hand the other end a one-line setup link,
-# add a proxy core (Iranian sites direct, the rest through the tunnel), tune the
-# kernel, watch status, and tear it all down again.
+# add a proxy core (Iranian sites direct, the rest through the tunnel), run the
+# web panel, tune the kernel, watch status, and tear it all down again.
 #
+#   bash <(curl -fsSL https://raw.githubusercontent.com/CluvexStudio/rakhsh/main/install.sh)
 #   sudo ./install.sh
+#   sudo ./install.sh --join rakhsh://…      join straight from a setup link
 #
-# Finds the `rakhsh` binary on its own (installed, next to this script, or a
-# local cargo build under target/). Override with: sudo RAKHSH_BIN=/path ./install.sh
+# Binaries: found if already present (installed, next to this script, or a local
+# cargo build under target/), otherwise downloaded from the GitHub release.
+# Override with  RAKHSH_BIN=/path  /  RAKHSH_CONTROL_BIN=/path,
+# or point elsewhere with  RAKHSH_REPO=owner/repo  RAKHSH_VERSION=v0.1.0
 set -u
+
+GH_REPO="${RAKHSH_REPO:-CluvexStudio/rakhsh}"
+GH_VERSION="${RAKHSH_VERSION:-latest}"
 
 # ─────────────────────────── theme · network / mesh ──────────────────
 if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ]; then
@@ -65,7 +72,7 @@ yesno(){ # yesno "prompt" y|n  -> 0 = yes
 # ─────────────────────────────── env ─────────────────────────────────
 # $EUID is a bash builtin: it works even where `id`/`whoami` are disabled
 # (some hosting images neuter them).
-[ "${EUID:-1}" -eq 0 ] || die "run as root (sudo $0)"
+case "${1:-}" in -h|--help) ;; *) [ "${EUID:-1}" -eq 0 ] || die "run as root (sudo $0)";; esac
 
 ARCH=$(uname -m 2>/dev/null); case "$ARCH" in ""|*isabled*) ARCH="${HOSTTYPE:-x86_64}";; esac
 OS=$(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-linux}")
@@ -105,9 +112,63 @@ locate_bin(){
   done
   return 1
 }
+# ─────────────────────────── fetching binaries ───────────────────────
+dl(){ # dl <url> <dest>
+  if command -v curl >/dev/null 2>&1; then curl -fsSL --retry 3 --max-time 180 -o "$2" "$1"
+  elif command -v wget >/dev/null 2>&1; then wget -q --tries=3 -O "$2" "$1"
+  else return 1; fi
+}
+
+gh_arch(){
+  case "$ARCH" in
+    x86_64|amd64)  echo x86_64-unknown-linux-musl;;
+    aarch64|arm64) echo aarch64-unknown-linux-musl;;
+    *) return 1;;
+  esac
+}
+
+# Download one release asset to /usr/local/bin, checking its sha256 when the
+# release publishes one.
+fetch_release(){ # fetch_release <binary name>
+  local name="$1" tgt base asset out sum
+  tgt=$(gh_arch) || { bad "no prebuilt binary for ${B}$ARCH${R}"; return 1; }
+  asset="$name-$tgt"
+  if [ "$GH_VERSION" = latest ]; then
+    base="https://github.com/$GH_REPO/releases/latest/download"
+  else
+    base="https://github.com/$GH_REPO/releases/download/$GH_VERSION"
+  fi
+  out="$TMPD/$name"
+  printf "  ${CYN}◌${R} downloading %s (%s)" "$name" "$tgt"
+  if ! dl "$base/$asset" "$out"; then
+    printf "\r  ${RED}${DOWN}${R} downloading %s\n" "$name"
+    info "no release asset at ${B}$base/$asset${R}"
+    info "if the repository is private, the download needs a token — build locally instead"
+    return 1
+  fi
+  if dl "$base/$asset.sha256" "$out.sha256" 2>/dev/null; then
+    sum=$(awk '{print $1}' "$out.sha256")
+    if [ "$(sha256sum "$out" | awk '{print $1}')" != "$sum" ]; then
+      printf "\r  ${RED}${DOWN}${R} downloading %s\n" "$name"
+      die "checksum mismatch for $asset — refusing to install it"
+    fi
+  else
+    printf "\r  ${YEL}△${R} downloading %s ${GRY}(no published checksum)${R}\n" "$name"
+  fi
+  install -m 0755 "$out" "/usr/local/bin/$name" || return 1
+  printf "\r  ${GRN}${NODE}${R} installed /usr/local/bin/%s      \n" "$name"
+  return 0
+}
+
 ensure_bin(){
   if ! locate_bin; then
-    bad "rakhsh binary not found."
+    info "rakhsh binary not found on this host"
+    if yesno "download it from github.com/$GH_REPO?" y; then
+      if fetch_release rakhsh; then BIN=/usr/local/bin/rakhsh; fi
+    fi
+  fi
+  if ! locate_bin; then
+    bad "no rakhsh binary."
     info "build it:  ${B}cargo zigbuild --release --target ${ARCH}-unknown-linux-musl${R}"
     info "then re-run from the project dir — it auto-finds ${B}target/.../release/rakhsh${R}"
     info "or copy it to ${B}/usr/local/bin/rakhsh${R}, or run ${B}sudo RAKHSH_BIN=/real/path ./install.sh${R}"
@@ -140,7 +201,13 @@ locate_ctl(){
 }
 ensure_ctl(){
   if ! locate_ctl; then
-    bad "rakhsh-control binary not found."
+    info "rakhsh-control binary not found on this host"
+    if yesno "download it from github.com/$GH_REPO?" y; then
+      fetch_release rakhsh-control && CTLBIN=/usr/local/bin/rakhsh-control
+    fi
+  fi
+  if ! locate_ctl; then
+    bad "no rakhsh-control binary."
     info "build it:  ${B}cargo build --release -p rakhsh-control${R}  (in control/)"
     info "or copy it to ${B}/usr/local/bin/rakhsh-control${R}, or run with ${B}RAKHSH_CONTROL_BIN=/real/path${R}"
     return 1
@@ -305,17 +372,20 @@ create_tunnel(){
   [ "$role" = entry ] && proxy_info "$CFG"
   printf "\n"; rule
   printf "\n  ${GRN}${B}Tunnel is up on this side.${R}  Now set up the ${B}${other_role}${R} server:\n\n"
-  printf "    run the installer there, choose ${CYN}“Join with a setup link”${R}, then paste:\n\n"
-  printf "  ${YEL}%s${R}\n\n" "$link"
+  printf "    paste this one line into it — nothing else to answer:\n\n"
+  printf "  ${YEL}bash <(curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh) --join %s${R}\n\n" "$GH_REPO" "$link"
+  printf "    ${GRY}or run the installer there and choose “Join with a setup link”, then paste:${R}\n\n"
+  printf "  ${GRY}%s${R}\n\n" "$link"
   [ "$role" = exit ] && [ ${#proxy_args[@]} -gt 0 ] && info "the proxy lives on the entry — its endpoints (and login) are shown after you join there"
   info "the link carries the other end's keys + settings — treat it like a password."
   rule
 }
 
-join_link(){
+join_link(){ # join_link [link]
   banner
   printf "  ${B}Join with a setup link${R}\n\n"
-  local link; read -rp "  ${CYN}${EDGE}${R} paste rakhsh:// link: " link
+  local link="${1:-}"
+  [ -z "$link" ] && read -rp "  ${CYN}${EDGE}${R} paste rakhsh:// link: " link
   [ -z "$link" ] && die "no link"
   local b64="${link#${LINK_PREFIX}}"
   local cfg; cfg=$(printf '%s' "$b64" | base64 -d 2>/dev/null) || die "bad link (base64 decode failed)"
@@ -479,6 +549,31 @@ do_uninstall(){
   [ $any = 0 ] && info "no rakhsh services installed"
   info "binary left at /usr/local/bin/rakhsh"
 }
+
+# ─────────────────────────── one-shot arguments ──────────────────────
+case "${1:-}" in
+  -h|--help)
+    banner
+    printf "  ${B}usage${R}\n\n"
+    printf "    sudo ./install.sh                  the menu\n"
+    printf "    sudo ./install.sh --join <link>    join straight from a rakhsh:// link\n"
+    printf "    sudo ./install.sh --panel          set up the web panel and print its login\n\n"
+    printf "  ${B}environment${R}\n\n"
+    printf "    RAKHSH_BIN= / RAKHSH_CONTROL_BIN=  use these binaries\n"
+    printf "    RAKHSH_REPO=owner/repo             download from another repository\n"
+    printf "    RAKHSH_VERSION=v0.1.0              pin a release (default: latest)\n\n"
+    exit 0;;
+  --join)
+    ensure_bin
+    join_link "${2:-}"
+    exit $?;;
+  --panel)
+    ensure_bin
+    create_panel
+    exit $?;;
+  "") ;;
+  *) die "unknown argument ${1}. Try --help";;
+esac
 
 # ─────────────────────────────── menu ────────────────────────────────
 ensure_bin
