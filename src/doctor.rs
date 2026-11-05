@@ -580,8 +580,8 @@ fn raw_socket(proto: u8, timeout_ms: i64) -> std::io::Result<std::os::fd::OwnedF
     let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
     if timeout_ms > 0 {
         let tv = libc::timeval {
-            tv_sec: timeout_ms / 1000,
-            tv_usec: (timeout_ms % 1000) * 1000,
+            tv_sec: (timeout_ms / 1000) as _,
+            tv_usec: ((timeout_ms % 1000) * 1000) as _,
         };
         unsafe {
             libc::setsockopt(
