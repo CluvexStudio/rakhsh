@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+# RUSTFLAGS is deliberately not set here: -D warnings in the environment
+# applies to dependencies as well, so one upstream crate's warning would fail
+# the build. Clippy gets the flag on its own command line instead.
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: rakhsh
+
+      - uses: actions/checkout@v5
+        with:
+          repository: CluvexStudio/shabdiz
+          path: shabdiz
+          token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rakhsh
+
+      # Scoped to this repo's packages: --all reaches into the shabdiz path
+      # dependency, which has its own CI.
+      - name: Formatting
+        working-directory: rakhsh
+        run: cargo fmt --check -p rakhsh -p rakhsh-control
+
+      - name: Clippy
+        working-directory: rakhsh
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        working-directory: rakhsh
+        run: cargo test --workspace
+
+      # The allocator is behind a feature so the odd release targets can drop
+      # it; this proves the build without it still compiles.
+      - name: Build without mimalloc
+        working-directory: rakhsh
+        run: cargo check -p rakhsh --no-default-features
+
+  panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: control/panel-ui/package-lock.json
+
+      - name: Install
+        working-directory: control/panel-ui
+        run: npm ci
+
+      - name: Types
+        working-directory: control/panel-ui
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: control/panel-ui
+        run: npm run build
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Shellcheck the installer
+        run: shellcheck --severity=warning install.sh
+
+      - name: install.sh --help works without root
+        run: bash install.sh --help

@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  ZIG_VERSION: 0.14.1
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # uname -m values are mapped onto these triples by gh_arch() in install.sh.
+          - { arch: x86_64, target: x86_64-unknown-linux-musl, required: true }
+          - { arch: aarch64, target: aarch64-unknown-linux-musl, required: true }
+          - { arch: armv7, target: armv7-unknown-linux-musleabihf, required: true }
+          - { arch: i686, target: i686-unknown-linux-musl, required: true }
+          # mimalloc is a C library; the rest take the Rust allocator rather
+          # than carry its build on architectures with no test hardware.
+          - { arch: armv6, target: arm-unknown-linux-musleabi, required: true, flags: --no-default-features }
+          - { arch: riscv64, target: riscv64gc-unknown-linux-musl, required: true, flags: --no-default-features }
+          # These two are the only ones allowed to fail without stopping a
+          # release: niche enough that a toolchain regression there should not
+          # hold back everyone else's binaries.
+          - { arch: loongarch64, target: loongarch64-unknown-linux-musl, required: false, flags: --no-default-features }
+          - { arch: ppc64le, target: powerpc64le-unknown-linux-musl, required: false, flags: --no-default-features }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: rakhsh
+
+      # rakhsh depends on shabdiz by path (../shabdiz), so both trees have to be
+      # side by side. github.token is enough once shabdiz is public; while it is
+      # private it needs a PAT with read access in secrets.SHABDIZ_TOKEN.
+      - uses: actions/checkout@v5
+        with:
+          repository: CluvexStudio/shabdiz
+          path: shabdiz
+          token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rakhsh
+          key: ${{ matrix.target }}
+
+      - name: Build
+        working-directory: rakhsh
+        run: |
+          cargo zigbuild --release --target ${{ matrix.target }} -p rakhsh ${{ matrix.flags }}
+          cargo zigbuild --release --target ${{ matrix.target }} -p rakhsh-control
+
+      - name: Name the assets and check them over
+        working-directory: rakhsh
+        run: |
+          set -eu
+          mkdir -p dist
+          for bin in rakhsh rakhsh-control; do
+            src="target/${{ matrix.target }}/release/$bin"
+            out="dist/$bin-${{ matrix.target }}"
+            install -m755 "$src" "$out"
+            ( cd dist && sha256sum "$bin-${{ matrix.target }}" > "$bin-${{ matrix.target }}.sha256" )
+            file "$out"
+            printf '%s  %s\n' "$(du -h "$out" | cut -f1)" "$out"
+          done
+          # A dynamic executable here means the musl target silently linked
+          # against the runner's glibc and would not start on a bare server.
+          for out in dist/rakhsh-* ; do
+            case "$out" in *.sha256) continue;; esac
+            if file "$out" | grep -q "dynamically linked"; then
+              echo "::error::$out is dynamically linked; it must be static"
+              exit 1
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: rakhsh/dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Collect the checksums
+        run: |
+          set -eu
+          cd dist
+          cat ./*.sha256 | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
+      # gh ships on the runner, so nothing third-party touches the step that
+      # publishes the binaries people download.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

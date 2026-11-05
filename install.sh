@@ -100,7 +100,7 @@ locate_bin(){
   local cands=(
     /usr/local/bin/rakhsh
     "$d/rakhsh"
-    "$d/target/${ARCH}-unknown-linux-musl/release/rakhsh"
+    "$d/target/${RUST_TARGET}/release/rakhsh"
     "$d"/target/*/release/rakhsh
     "$d/target/release/rakhsh"
     "$d/target/debug/rakhsh"
@@ -119,13 +119,23 @@ dl(){ # dl <url> <dest>
   else return 1; fi
 }
 
+# Map what the kernel calls this machine onto the release asset built for it.
+# The right-hand side has to match the target matrix in .github/workflows/release.yml.
 gh_arch(){
   case "$ARCH" in
-    x86_64|amd64)  echo x86_64-unknown-linux-musl;;
-    aarch64|arm64) echo aarch64-unknown-linux-musl;;
+    x86_64|amd64)           echo x86_64-unknown-linux-musl;;
+    armv8l|armv7*)          echo armv7-unknown-linux-musleabihf;;
+    aarch64|arm64|armv8*)   echo aarch64-unknown-linux-musl;;
+    armv6*|armv5*|arm)      echo arm-unknown-linux-musleabi;;
+    i386|i486|i586|i686|x86) echo i686-unknown-linux-musl;;
+    riscv64*)               echo riscv64gc-unknown-linux-musl;;
+    loongarch64)            echo loongarch64-unknown-linux-musl;;
+    ppc64le|powerpc64le)    echo powerpc64le-unknown-linux-musl;;
     *) return 1;;
   esac
 }
+
+RUST_TARGET=$(gh_arch 2>/dev/null) || RUST_TARGET="${ARCH}-unknown-linux-musl"
 
 # Download one release asset to /usr/local/bin, checking its sha256 when the
 # release publishes one.
@@ -169,7 +179,7 @@ ensure_bin(){
   fi
   if ! locate_bin; then
     bad "no rakhsh binary."
-    info "build it:  ${B}cargo zigbuild --release --target ${ARCH}-unknown-linux-musl${R}"
+    info "build it:  ${B}cargo zigbuild --release --target ${RUST_TARGET}${R}"
     info "then re-run from the project dir — it auto-finds ${B}target/.../release/rakhsh${R}"
     info "or copy it to ${B}/usr/local/bin/rakhsh${R}, or run ${B}sudo RAKHSH_BIN=/real/path ./install.sh${R}"
     die "need the binary to continue"
@@ -186,7 +196,7 @@ locate_ctl(){
   local cands=(
     /usr/local/bin/rakhsh-control
     "$d/rakhsh-control"
-    "$d/target/${ARCH}-unknown-linux-musl/release/rakhsh-control"
+    "$d/target/${RUST_TARGET}/release/rakhsh-control"
     "$d"/target/*/release/rakhsh-control
     "$d/target/release/rakhsh-control"
     "$d/control/target/release/rakhsh-control"
@@ -286,7 +296,7 @@ create_tunnel(){
   printf "    ${CYN}1${R}) ${B}entry${R}   ${GRY}(inside Iran — users connect here)${R}\n"
   printf "    ${CYN}2${R}) ${B}exit${R}    ${GRY}(abroad — reaches the open internet)${R}\n"
   ask "choice" 1 x
-  if [ "$x" = 2 ]; then role=exit; other_role=entry; else role=entry; other_role=exit; fi
+  if [ "$x" = 2 ]; then role="exit"; other_role="entry"; else role="entry"; other_role="exit"; fi
 
   printf "\n  Carrier (how bytes cross the border):\n"
   printf "    ${CYN}1${R}) ${B}wss${R}    ${GRY}camouflaged HTTPS/WebSocket — probe-resistant ${GRN}(recommended)${R}\n"
@@ -324,7 +334,7 @@ create_tunnel(){
   ask "choice" 1 m
   [ "$m" = 2 ] && { direct=1; dir="--direct"; }
 
-  local listen_role; [ "$direct" = 1 ] && listen_role=exit || listen_role=entry
+  local listen_role; [ "$direct" = 1 ] && listen_role="exit" || listen_role="entry"
   local def_ip="1.2.3.4"; [ "$role" = "$listen_role" ] && def_ip="${PUBIP:-1.2.3.4}"
   printf "\n  Public address of the ${B}${listen_role}${R} (what the other end dials):\n"
   ask "address" "${def_ip}:7000" addr
@@ -374,6 +384,7 @@ create_tunnel(){
   printf "\n  ${GRN}${B}Tunnel is up on this side.${R}  Now set up the ${B}${other_role}${R} server:\n\n"
   printf "    paste this one line into it — nothing else to answer:\n\n"
   printf "  ${YEL}bash <(curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh) --join %s${R}\n\n" "$GH_REPO" "$link"
+  # shellcheck disable=SC1111 # the typographic quotes are deliberate in output
   printf "    ${GRY}or run the installer there and choose “Join with a setup link”, then paste:${R}\n\n"
   printf "  ${GRY}%s${R}\n\n" "$link"
   [ "$role" = exit ] && [ ${#proxy_args[@]} -gt 0 ] && info "the proxy lives on the entry — its endpoints (and login) are shown after you join there"

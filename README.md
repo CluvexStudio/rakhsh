@@ -65,7 +65,11 @@ bash <(curl -fsSL .../install.sh) --join rakhsh://…
 ```
 
 `--panel` sets up the web panel and prints its generated username and password. `--help` lists
-the rest. Or build it yourself:
+the rest.
+
+Every release carries a static musl binary for x86-64, aarch64, armv7, armv6, i686, riscv64,
+loongarch64 and ppc64le, each next to a checksum the installer verifies before it installs
+anything. Or build it yourself:
 
 ```
 cargo build --release
