@@ -2,9 +2,14 @@
 name = "rakhsh"
 version = "0.1.0"
 edition = "2021"
+authors = ["CluvexStudio"]
 description = "A fast, authenticated, multiplexed tunnel between two servers."
 license = "AGPL-3.0-only"
 repository = "https://github.com/CluvexStudio/rakhsh"
+
+[features]
+default = ["mimalloc"]
+mimalloc = ["dep:mimalloc"]
 
 [[bin]]
 name = "rakhsh"
@@ -24,7 +29,7 @@ blake3 = "=1.8.7"
 base64 = "=0.22.1"
 ring = "=0.17.14"
 serde_json = "=1.0.154"
-mimalloc = { version = "=0.1.52", default-features = false }
+mimalloc = { version = "=0.1.52", default-features = false, optional = true }
 serde = { version = "=1.0.229", features = ["derive"] }
 toml = "=1.1.8"
 clap = { version = "=4.6.7", features = ["derive"] }

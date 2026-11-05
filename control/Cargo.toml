@@ -2,8 +2,10 @@
 name = "rakhsh-control"
 version = "0.1.0"
 edition = "2021"
+authors = ["CluvexStudio"]
 description = "rakhsh Control Center: web panel + Telegram bot over a fleet of rakhsh nodes."
 license = "AGPL-3.0-only"
+repository = "https://github.com/CluvexStudio/rakhsh"
 
 [[bin]]
 name = "rakhsh-control"
