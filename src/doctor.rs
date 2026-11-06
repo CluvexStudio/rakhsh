@@ -154,6 +154,24 @@ pub fn needs_root(name: &str) -> bool {
     RAW_CARRIERS.contains(&name) || name == "shabdiz-gre" || name == "shabdiz-l2"
 }
 
+pub fn needs_public_address(name: &str) -> bool {
+    name == "shabdiz-gre"
+}
+
+pub fn behind_nat(peer: &str) -> Option<Ipv4Addr> {
+    let host = peer.rsplit_once(':').map_or(peer, |(h, _)| h);
+    let addr: Ipv4Addr = host.parse().ok()?;
+    if addr.is_private() || addr.is_loopback() {
+        return None;
+    }
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect((addr, 9)).ok()?;
+    match sock.local_addr().ok()? {
+        std::net::SocketAddr::V4(a) if a.ip().is_private() => Some(*a.ip()),
+        _ => None,
+    }
+}
+
 fn probe_config(base: &Config, carrier: &str, port: u16, peer: Option<&str>) -> Config {
     let mut cfg = base.clone();
     cfg.carrier = Some(carrier.to_string());
@@ -270,6 +288,18 @@ async fn accept_dgram(
 }
 
 pub async fn measure(base: &Config, carrier: &str, peer: &str, seconds: u64) -> Verdict {
+    if needs_public_address(carrier) {
+        if let Some(local) = behind_nat(peer) {
+            return Verdict::refused(
+                carrier,
+                format!(
+                    "this host is {local} behind NAT, and this carrier has no ports for NAT to \
+                     translate, so the far end's packets can never be routed back here; it needs \
+                     a public address on both ends"
+                ),
+            );
+        }
+    }
     if crate::dgram::is_datagram(carrier) {
         return measure_dgram(base, carrier, peer, seconds).await;
     }

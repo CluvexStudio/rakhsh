@@ -329,3 +329,30 @@ fn every_protocol_number_is_named_and_distinct() {
         "icmp, tcp and udp are carriers of their own, not protocol-number probes"
     );
 }
+
+#[tokio::test]
+async fn a_portless_carrier_behind_nat_is_refused_with_the_reason() {
+    let Some(local) = behind_nat("203.0.113.1") else {
+        eprintln!("this host has a public route; nothing to check");
+        return;
+    };
+    let v = measure(&base(), "shabdiz-gre", "203.0.113.1:7901", 1).await;
+    assert!(
+        !v.usable() && !v.reached,
+        "it cannot work, so it must not try"
+    );
+    for part in [&local.to_string(), "no ports", "public address"] {
+        assert!(
+            v.note.contains(part),
+            "the note must explain why, not just time out: {}",
+            v.note
+        );
+    }
+
+    let other = measure(&base(), "shabdiz-udp", "127.0.0.1:1", 1).await;
+    assert!(
+        !other.note.contains("public address"),
+        "a carrier with ports is unaffected: {}",
+        other.note
+    );
+}
