@@ -658,7 +658,7 @@ async fn report(h: Arc<Handle>, carrier: Arc<dyn Carrier>) {
         last = (s.tx_datagrams, s.rx_datagrams);
         info!(
             "shabdiz: tx {} / {:.1} MiB ({} err, {} dropped), rx {} / {:.1} MiB ({} dropped) | \
-             loss in {:.2}% out {:.2}% | rtt {:.1} ms jitter {:.1} ms | {} rejected{}",
+             loss in {:.2}% out {:.2}% | rtt {} jitter {:.1} ms | {} rejected{}",
             s.tx_datagrams,
             s.tx_bytes as f64 / 1_048_576.0,
             s.tx_errors,
@@ -668,7 +668,11 @@ async fn report(h: Arc<Handle>, carrier: Arc<dyn Carrier>) {
             s.rx_dropped,
             s.loss_ratio() * 100.0,
             s.peer_loss_ratio() * 100.0,
-            s.rtt_us as f64 / 1000.0,
+            if s.rtt_us == 0 {
+                "— (the dialling end measures it)".to_string()
+            } else {
+                format!("{:.1} ms", s.rtt_us as f64 / 1000.0)
+            },
             s.jitter_us as f64 / 1000.0,
             s.rejected,
             match carrier.pacer() {
