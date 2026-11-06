@@ -226,12 +226,7 @@ fn render(
 
     if role == "entry" {
         if let Some(p) = &spec.proxy {
-            s.push_str(&format!(
-                "\n[[inbound]]\ntag = \"proxy\"\ntype = \"mixed\"\nlisten = \"{p}\"\n"
-            ));
-            s.push_str("\n[[outbound]]\ntag = \"tunnel\"\ntype = \"tunnel\"\n");
-            s.push_str("\n[[outbound]]\ntag = \"direct\"\ntype = \"direct\"\n");
-            s.push_str("\n[route]\nfinal = \"tunnel\"\n");
+            s.push_str(&crate::cli::proxy_block(Some(p), false, true));
         }
     }
     s

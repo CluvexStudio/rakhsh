@@ -226,3 +226,21 @@ fn a_listening_node_binds_the_port_it_is_published_on() {
         "each listener takes its own port, or two of them cannot share a fleet"
     );
 }
+
+#[test]
+fn a_proxy_anyone_can_reach_gets_a_login_and_a_local_one_does_not() {
+    for (listen, public) in [("0.0.0.0:1080", true), ("127.0.0.1:1080", false)] {
+        let mut s = spec(&["de=1.1.1.1"], &["ir=3.3.3.3"], Dial::Exit);
+        s.proxy = Some(listen.into());
+        let nodes = plan(&s).unwrap();
+        let entry = nodes.iter().find(|n| n.role == "entry").unwrap();
+        let proxy = parse(entry).inbound.into_iter().next().expect("the proxy");
+        assert_eq!(
+            proxy.password.is_some() && proxy.username.is_some(),
+            public,
+            "a proxy on {listen} must {} a login: {}",
+            if public { "have" } else { "not need" },
+            entry.config
+        );
+    }
+}

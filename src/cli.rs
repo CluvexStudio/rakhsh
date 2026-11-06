@@ -886,7 +886,7 @@ fn rand_token(n: usize) -> String {
     base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(b)
 }
 
-fn proxy_block(listen: Option<&str>, split_iran: bool, with_tunnel: bool) -> String {
+pub(crate) fn proxy_block(listen: Option<&str>, split_iran: bool, with_tunnel: bool) -> String {
     let mut s = String::new();
     if let Some(listen) = listen {
         let loopback = listen.starts_with("127.")
