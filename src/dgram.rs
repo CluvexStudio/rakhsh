@@ -40,6 +40,53 @@ pub fn selected(cfg: &Config) -> bool {
     cfg.carrier.as_deref().and_then(kind_of).is_some()
 }
 
+pub fn is_datagram(carrier: &str) -> bool {
+    kind_of(carrier).is_some()
+}
+
+pub async fn open(cfg: &Config, dialer: bool) -> Result<(Arc<Handle>, Arc<dyn Carrier>)> {
+    let kind = cfg
+        .carrier
+        .as_deref()
+        .and_then(kind_of)
+        .ok_or_else(|| anyhow!("not a shabdiz carrier"))?;
+    let carrier = build_carrier(cfg, kind, dialer).await?;
+    let (local, peer, psk) = (
+        cfg.secret_key()?,
+        cfg.peer_key()?,
+        crate::noise::derive_psk(&cfg.token),
+    );
+    let config = session::Config {
+        ring: 1024,
+        ..session::Config::default()
+    };
+    let handle = if dialer {
+        let (keys, params) =
+            handshake::dial(&*carrier, &local, &peer, &psk, Duration::from_secs(3), 10)
+                .await
+                .context("shabdiz handshake")?;
+        info!("shabdiz up: payload mtu {}", params.payload_mtu);
+        session::start(carrier.clone(), keys, params, Role::Dialer, config, None)
+    } else {
+        let a = handshake::accept(&*carrier, &local, &peer, &psk)
+            .await
+            .context("shabdiz handshake")?;
+        info!("shabdiz up: payload mtu {}", a.params.payload_mtu);
+        session::start(
+            carrier.clone(),
+            a.keys,
+            a.params,
+            Role::Responder,
+            config,
+            Some(session::Handshake {
+                first: a.first,
+                reply: a.reply,
+            }),
+        )
+    };
+    Ok((Arc::new(handle), carrier))
+}
+
 pub fn describe(cfg: &Config) -> Vec<String> {
     let mut out = Vec::new();
     let Some(kind) = cfg.carrier.as_deref().and_then(kind_of) else {
@@ -207,7 +254,7 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     let mut backoff = Duration::from_millis(500);
     loop {
-        match serve_once(&cfg, kind, dialer, fwd).await {
+        match serve_once(&cfg, dialer, fwd).await {
             Ok(()) => backoff = Duration::from_millis(500),
             Err(e) => {
                 warn!("shabdiz session ended: {e:#}");
@@ -243,64 +290,9 @@ fn one_udp_forward(cfg: &Config) -> Result<(SocketAddr, SocketAddr)> {
     ))
 }
 
-async fn serve_once(
-    cfg: &Config,
-    kind: Kind,
-    dialer: bool,
-    fwd: (SocketAddr, SocketAddr),
-) -> Result<()> {
-    let carrier = build_carrier(cfg, kind, dialer).await?;
-    let (local, peer, psk) = (
-        cfg.secret_key()?,
-        cfg.peer_key()?,
-        crate::noise::derive_psk(&cfg.token),
-    );
-
-    let (handle, label) = if dialer {
-        let (keys, params) =
-            handshake::dial(&*carrier, &local, &peer, &psk, Duration::from_secs(3), 10)
-                .await
-                .context("shabdiz handshake")?;
-        info!("shabdiz up: payload mtu {}", params.payload_mtu);
-        (
-            session::start(
-                carrier.clone(),
-                keys,
-                params,
-                Role::Dialer,
-                session::Config {
-                    ring: 1024,
-                    ..session::Config::default()
-                },
-                None,
-            ),
-            "dialer",
-        )
-    } else {
-        let a = handshake::accept(&*carrier, &local, &peer, &psk)
-            .await
-            .context("shabdiz handshake")?;
-        info!("shabdiz up: payload mtu {}", a.params.payload_mtu);
-        (
-            session::start(
-                carrier.clone(),
-                a.keys,
-                a.params,
-                Role::Responder,
-                session::Config {
-                    ring: 1024,
-                    ..session::Config::default()
-                },
-                Some(session::Handshake {
-                    first: a.first,
-                    reply: a.reply,
-                }),
-            ),
-            "responder",
-        )
-    };
-
-    let handle = Arc::new(handle);
+async fn serve_once(cfg: &Config, dialer: bool, fwd: (SocketAddr, SocketAddr)) -> Result<()> {
+    let (handle, carrier) = open(cfg, dialer).await?;
+    let label = if dialer { "dialer" } else { "responder" };
     let probe = {
         let handle = handle.clone();
         let openvpn = cfg.openvpn.clone();

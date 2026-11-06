@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -15,6 +15,8 @@ pub const CONTROL: &str = "rakhsh-doctor/1";
 pub const HEADER: &str = "  carrier       state              goodput  note";
 
 const HANDSHAKE_BUDGET: Duration = Duration::from_secs(6);
+const DGRAM_BUDGET: Duration = Duration::from_secs(12);
+const DGRAM_BURST: usize = 32;
 const RECORD: usize = 16 * 1024;
 const SETTLE: Duration = Duration::from_millis(400);
 
@@ -94,6 +96,12 @@ impl Plan {
             STREAM_CARRIERS.iter().map(|s| s.to_string()).collect()
         } else {
             for name in only {
+                if name == "spoof" {
+                    bail!(
+                        "spoof needs forged source addresses (spoof_src_ip, spoof_peer_src) that \
+                         the doctor cannot choose for you; measure it with `rakhsh spoof-test`"
+                    );
+                }
                 if !known(name) {
                     bail!("{name:?} is not a carrier rakhsh has");
                 }
@@ -202,7 +210,64 @@ async fn drain(enc: &Enc, rx: &mut BoxRx, seconds: u64) -> u64 {
     got
 }
 
+async fn measure_dgram(base: &Config, carrier: &str, peer: &str, seconds: u64) -> Verdict {
+    let mut cfg = probe_config(base, carrier, 0, Some(peer));
+    cfg.peer_ip = peer.rsplit_once(':').map(|(host, _)| host.to_string());
+    let handle = match tokio::time::timeout(DGRAM_BUDGET, crate::dgram::open(&cfg, true)).await {
+        Ok(Ok((handle, _))) => handle,
+        Ok(Err(e)) => return Verdict::refused(carrier, first_line(&format!("{e:#}"))),
+        Err(_) => return Verdict::refused(carrier, "the carrier did not answer in time"),
+    };
+    let payload = vec![0u8; handle.payload_mtu().clamp(64, 1400)];
+    let until = Instant::now() + Duration::from_secs(seconds);
+    while Instant::now() < until && !handle.is_closed() {
+        for _ in 0..DGRAM_BURST {
+            handle.send(1, &payload);
+        }
+        tokio::task::yield_now().await;
+    }
+    Verdict {
+        carrier: carrier.to_string(),
+        reached: true,
+        handshook: true,
+        held: true,
+        mbit: 0.0,
+        note: String::new(),
+    }
+}
+
+async fn accept_dgram(
+    base: &Config,
+    carrier: &str,
+    port: u16,
+    seconds: u64,
+    from: IpAddr,
+) -> Result<u64> {
+    let mut cfg = probe_config(base, carrier, port, None);
+    cfg.peer_ip = Some(from.to_string());
+    let (handle, _) = tokio::time::timeout(
+        DGRAM_BUDGET + Duration::from_secs(seconds),
+        crate::dgram::open(&cfg, false),
+    )
+    .await
+    .context("the peer never completed a shabdiz handshake")??;
+    let until = Instant::now() + Duration::from_secs(seconds) + SETTLE;
+    let mut got = 0u64;
+    let mut batch = Vec::with_capacity(64);
+    while Instant::now() < until {
+        let left = until.saturating_duration_since(Instant::now());
+        match tokio::time::timeout(left, handle.recv_batch(&mut batch, 64)).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => got += batch.iter().map(|(_, p)| p.len() as u64).sum::<u64>(),
+        }
+    }
+    Ok(got)
+}
+
 pub async fn measure(base: &Config, carrier: &str, peer: &str, seconds: u64) -> Verdict {
+    if crate::dgram::is_datagram(carrier) {
+        return measure_dgram(base, carrier, peer, seconds).await;
+    }
     let cfg = probe_config(base, carrier, 0, Some(peer));
     let built = match Carrier::from_cfg(&cfg) {
         Ok(c) => c,
@@ -280,6 +345,7 @@ pub async fn serve(base: &Config, port: u16) -> Result<()> {
 }
 
 async fn session(base: &Config, sock: TcpStream) -> Result<()> {
+    let from = sock.peer_addr().context("reading the peer address")?.ip();
     let (read, mut write) = sock.into_split();
     let mut lines = BufReader::new(read).lines();
 
@@ -291,7 +357,7 @@ async fn session(base: &Config, sock: TcpStream) -> Result<()> {
                 let name = parts.next().unwrap_or_default().to_string();
                 let port: u16 = parts.next().unwrap_or("0").parse().unwrap_or(0);
                 let seconds: u64 = parts.next().unwrap_or("8").parse().unwrap_or(8);
-                match accept_one(base, &name, port, seconds).await {
+                match accept_one(base, &name, port, seconds, from).await {
                     Ok(bytes) => {
                         write
                             .write_all(format!("GOT {bytes}\n").as_bytes())
@@ -339,7 +405,16 @@ async fn session(base: &Config, sock: TcpStream) -> Result<()> {
     Ok(())
 }
 
-async fn accept_one(base: &Config, carrier: &str, port: u16, seconds: u64) -> Result<u64> {
+async fn accept_one(
+    base: &Config,
+    carrier: &str,
+    port: u16,
+    seconds: u64,
+    from: IpAddr,
+) -> Result<u64> {
+    if crate::dgram::is_datagram(carrier) {
+        return accept_dgram(base, carrier, port, seconds, from).await;
+    }
     let cfg = probe_config(base, carrier, port, None);
     let built = Carrier::from_cfg(&cfg).with_context(|| format!("building {carrier}"))?;
     let keys = Keys::from_cfg(&cfg)?;
@@ -499,6 +574,8 @@ pub async fn run(base: &Config, peer: &str, port: u16, plan: Plan) -> Result<Rep
                 v.held = false;
                 v.mbit = 0.0;
                 v.note = "handshake completed, then no data arrived at the far end".into();
+            } else if crate::dgram::is_datagram(carrier) && v.handshook {
+                v.mbit = got as f64 * 8.0 / plan.seconds.max(1) as f64 / 1_000_000.0;
             }
         } else if let Some(why) = answer.strip_prefix("FAILED ") {
             if v.note.is_empty() {
