@@ -371,6 +371,32 @@ struct IcmpLink {
     peer: Peer,
     id: u16,
     seq: AtomicU32,
+    initiator: bool,
+}
+
+const ICMP_ECHO_REPLY: u8 = 0;
+const ICMP_ECHO_REQUEST: u8 = 8;
+const ICMP_TO_LISTENER: u8 = 1;
+const ICMP_TO_INITIATOR: u8 = 2;
+
+impl IcmpLink {
+    fn outgoing(&self) -> (u8, u8, u16) {
+        if self.initiator {
+            let seq = self.seq.fetch_add(1, SeqCst) as u16;
+            (ICMP_ECHO_REQUEST, ICMP_TO_LISTENER, seq)
+        } else {
+            let seq = self.seq.load(SeqCst) as u16;
+            (ICMP_ECHO_REPLY, ICMP_TO_INITIATOR, seq)
+        }
+    }
+
+    fn incoming(&self) -> (u8, u8) {
+        if self.initiator {
+            (ICMP_ECHO_REPLY, ICMP_TO_INITIATOR)
+        } else {
+            (ICMP_ECHO_REQUEST, ICMP_TO_LISTENER)
+        }
+    }
 }
 
 #[async_trait]
@@ -379,11 +405,12 @@ impl RawLink for IcmpLink {
         let Some(peer) = self.peer.get() else {
             return Ok(());
         };
-        let seq = self.seq.fetch_add(1, SeqCst) as u16;
-        let mut pkt = Vec::with_capacity(8 + payload.len());
-        pkt.extend_from_slice(&[0, 0, 0, 0]);
+        let (kind, dir, seq) = self.outgoing();
+        let mut pkt = Vec::with_capacity(9 + payload.len());
+        pkt.extend_from_slice(&[kind, 0, 0, 0]);
         pkt.extend_from_slice(&self.id.to_be_bytes());
         pkt.extend_from_slice(&seq.to_be_bytes());
+        pkt.push(dir);
         pkt.extend_from_slice(payload);
         let c = checksum(&pkt, 0);
         pkt[2..4].copy_from_slice(&c.to_be_bytes());
@@ -391,6 +418,7 @@ impl RawLink for IcmpLink {
     }
 
     async fn recv(&self, out: &mut [u8]) -> std::io::Result<usize> {
+        let (want_kind, want_dir) = self.incoming();
         let mut buf = RX_POOL.rx();
         loop {
             let (n, src) = self.sock.recv_from(&mut buf).await?;
@@ -398,19 +426,23 @@ impl RawLink for IcmpLink {
                 continue;
             }
             let ihl = ((buf[0] & 0x0f) as usize) * 4;
-            if n < ihl + 8 {
+            if n < ihl + 9 {
                 continue;
             }
             let icmp = &buf[ihl..n];
-            if icmp[0] != 0 {
+            if icmp[0] != want_kind || icmp[8] != want_dir {
                 continue;
             }
             let id = u16::from_be_bytes([icmp[4], icmp[5]]);
             if id != self.id {
                 continue;
             }
+            if !self.initiator {
+                let seq = u16::from_be_bytes([icmp[6], icmp[7]]);
+                self.seq.store(seq as u32, SeqCst);
+            }
             self.peer.learn(src);
-            let payload = &icmp[8..];
+            let payload = &icmp[9..];
             let m = payload.len().min(out.len());
             out[..m].copy_from_slice(&payload[..m]);
             return Ok(m);
@@ -653,54 +685,117 @@ impl RawLink for SpoofLink {
     }
 }
 
-static IPT_RULES: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
-
-fn iptables(args: &[&str]) {
-    let _ = std::process::Command::new("iptables").args(args).status();
+enum Rule {
+    Iptables(Vec<String>),
+    Nft(String),
 }
 
-fn add_rule(mut add: Vec<String>) {
-    let a: Vec<&str> = add.iter().map(|s| s.as_str()).collect();
-    iptables(&a);
-    for x in add.iter_mut() {
-        if x == "-I" || x == "-A" {
-            *x = "-D".into();
+static RULES: Mutex<Vec<Rule>> = Mutex::new(Vec::new());
+
+fn quiet(cmd: &str, args: &[&str]) -> bool {
+    std::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn nft_load(script: &str) -> bool {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let Ok(mut child) = Command::new("nft")
+        .args(["-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let wrote = child
+        .stdin
+        .take()
+        .map(|mut s| s.write_all(script.as_bytes()).is_ok())
+        .unwrap_or(false);
+    child.wait().map(|s| s.success()).unwrap_or(false) && wrote
+}
+
+fn install(table: &str, iptables_rules: &[Vec<String>], nft_chains: &str) {
+    let mut added = Vec::new();
+    for r in iptables_rules {
+        let a: Vec<&str> = r.iter().map(String::as_str).collect();
+        if !quiet("iptables", &a) {
             break;
         }
+        let mut del = r.clone();
+        if let Some(x) = del.iter_mut().find(|x| *x == "-I" || *x == "-A") {
+            *x = "-D".into();
+        }
+        added.push(del);
     }
-    IPT_RULES.lock().unwrap().push(add);
+    if added.len() == iptables_rules.len() {
+        RULES
+            .lock()
+            .unwrap()
+            .extend(added.into_iter().map(Rule::Iptables));
+        return;
+    }
+    for del in added {
+        let a: Vec<&str> = del.iter().map(String::as_str).collect();
+        quiet("iptables", &a);
+    }
+    quiet("nft", &["delete", "table", "inet", table]);
+    if nft_load(&format!("table inet {table} {{\n{nft_chains}\n}}\n")) {
+        info!("raw: installed {table} with nft (no usable iptables on this host)");
+        RULES.lock().unwrap().push(Rule::Nft(table.to_string()));
+        return;
+    }
+    tracing::warn!(
+        "raw: could not install the {table} rule with iptables or nft, so the kernel will \
+         answer this carrier's packets on its own; run as root on a host with iptables or nftables"
+    );
 }
 
 fn install_rst_drop(sport: u16) {
     let tag = format!("rakhsh-faketcp-{sport}");
-    add_rule(
-        [
-            "-I",
-            "OUTPUT",
-            "-p",
-            "tcp",
-            "--sport",
-            &sport.to_string(),
-            "--tcp-flags",
-            "RST",
-            "RST",
-            "-m",
-            "comment",
-            "--comment",
-            &tag,
-            "-j",
-            "DROP",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect(),
+    let rule: Vec<String> = [
+        "-I",
+        "OUTPUT",
+        "-p",
+        "tcp",
+        "--sport",
+        &sport.to_string(),
+        "--tcp-flags",
+        "RST",
+        "RST",
+        "-m",
+        "comment",
+        "--comment",
+        &tag,
+        "-j",
+        "DROP",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    install(
+        &format!("rakhsh_rst_{sport}"),
+        &[rule],
+        &format!(
+            "chain out {{ type filter hook output priority 0; policy accept; \
+             tcp sport {sport} tcp flags & rst == rst drop; }}"
+        ),
     );
 }
 
 fn install_notrack(port: u16) {
     let tag = format!("rakhsh-l2-{port}");
-    for (chain, dir) in [("PREROUTING", "--dport"), ("OUTPUT", "--sport")] {
-        add_rule(
+    let rules: Vec<Vec<String>> = [("PREROUTING", "--dport"), ("OUTPUT", "--sport")]
+        .iter()
+        .map(|(chain, dir)| {
             [
                 "-t",
                 "raw",
@@ -719,16 +814,33 @@ fn install_notrack(port: u16) {
             ]
             .iter()
             .map(|s| s.to_string())
-            .collect(),
-        );
-    }
+            .collect()
+        })
+        .collect();
+    install(
+        &format!("rakhsh_notrack_{port}"),
+        &rules,
+        &format!(
+            "chain pre {{ type filter hook prerouting priority -300; policy accept; \
+             tcp dport {port} notrack; }}\n\
+             chain out {{ type filter hook output priority -300; policy accept; \
+             tcp sport {port} notrack; }}"
+        ),
+    );
 }
 
 pub fn cleanup() {
-    let rules = std::mem::take(&mut *IPT_RULES.lock().unwrap());
+    let rules = std::mem::take(&mut *RULES.lock().unwrap());
     for r in rules {
-        let a: Vec<&str> = r.iter().map(|s| s.as_str()).collect();
-        iptables(&a);
+        match r {
+            Rule::Iptables(del) => {
+                let a: Vec<&str> = del.iter().map(String::as_str).collect();
+                quiet("iptables", &a);
+            }
+            Rule::Nft(table) => {
+                quiet("nft", &["delete", "table", "inet", &table]);
+            }
+        }
     }
 }
 
@@ -1091,6 +1203,7 @@ pub async fn connect(
             peer: Peer::new(peer),
             id: lp.icmp_id,
             seq: AtomicU32::new(1),
+            initiator,
         }),
         "faketcp" => {
             let anchor = peer.unwrap_or(Ipv4Addr::new(8, 8, 8, 8));
