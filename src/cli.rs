@@ -819,7 +819,7 @@ fn init(args: &InitArgs) -> Result<()> {
                  end's\n# address from. Set peer_ip to the {} public address, or pass \
                  --peer-ip to\n# `rakhsh init` to have it written here.\n# \
                  peer_ip = \"203.0.113.9\"\n",
-                if direct { "exit's" } else { "entry's" }
+                if direct { "entry's" } else { "exit's" }
             ),
         };
         (format!("peer_ip = \"{host}\"\n"), listens)

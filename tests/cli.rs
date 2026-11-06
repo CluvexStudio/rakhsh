@@ -432,3 +432,32 @@ fn check_names_what_a_datagram_carrier_does_not_read() {
         assert!(said.contains(key), "{key} is not named as ignored: {said}");
     }
 }
+
+#[test]
+fn a_forging_carrier_tells_the_listening_end_to_set_the_far_address() {
+    for (direct, listener, far) in [(false, "entry", "exit's"), (true, "exit", "entry's")] {
+        let mut args = vec![
+            "init",
+            "--tunnel-addr",
+            "198.51.100.7:7950",
+            "--carrier",
+            "shabdiz-gre",
+            "--forward",
+            "0.0.0.0:5300=127.0.0.1:5300/udp",
+        ];
+        if direct {
+            args.push("--direct");
+        }
+        let (ok, said) = rakhsh(&args);
+        assert!(ok, "init: {said}");
+        let (entry, exit) = said
+            .split_once("########## exit.toml")
+            .expect("init prints both halves");
+        let half = if listener == "entry" { entry } else { exit };
+        let want = format!("Set peer_ip to the {far} public address");
+        assert!(
+            half.contains(&want),
+            "the listening {listener} must be told to set the {far} address: {half}"
+        );
+    }
+}
