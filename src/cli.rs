@@ -426,6 +426,8 @@ pub async fn run() -> Result<()> {
             protocols,
             out,
         } => {
+            tidy_on_signal();
+            let _tidy = Tidy;
             let cfg = config::Config::load(&config)?;
             match (serve, peer.as_deref()) {
                 (true, None) => doctor::serve(&cfg, port).await?,
@@ -537,17 +539,7 @@ pub async fn run() -> Result<()> {
         Cmd::Uninstall { name } => uninstall_service(&name)?,
         Cmd::Optimize { persist } => optimize(persist)?,
         Cmd::Run { config } => {
-            tokio::spawn(async {
-                let mut term =
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                        .expect("sigterm");
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = term.recv() => {}
-                }
-                raw::cleanup();
-                std::process::exit(0);
-            });
+            tidy_on_signal();
             let cfg = config::Config::load(&config)?;
             if dgram::selected(&cfg) {
                 return dgram::run(cfg).await;
@@ -918,6 +910,32 @@ pub(crate) fn proxy_block(listen: Option<&str>, split_iran: bool, with_tunnel: b
         );
     }
     s
+}
+
+fn tidy() {
+    raw::cleanup();
+    shabdiz::carrier::l2::cleanup();
+}
+
+struct Tidy;
+
+impl Drop for Tidy {
+    fn drop(&mut self) {
+        tidy();
+    }
+}
+
+fn tidy_on_signal() {
+    tokio::spawn(async {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("sigterm");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+        tidy();
+        std::process::exit(0);
+    });
 }
 
 fn init_node(listen: &str) {
