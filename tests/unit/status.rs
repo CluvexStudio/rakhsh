@@ -34,3 +34,39 @@ fn loss_and_rtt_fold() {
     l.pongs = 20;
     assert_eq!(l.loss_pct(), 0.0);
 }
+
+#[tokio::test]
+async fn a_second_server_leaves_a_live_socket_to_its_owner() {
+    use std::os::unix::fs::MetadataExt;
+    use std::time::Duration;
+    let path = std::env::temp_dir()
+        .join(format!("rakhsh-status-{}.sock", std::process::id()))
+        .display()
+        .to_string();
+    let first = tokio::spawn(serve(path.clone()));
+    for _ in 0..100 {
+        if tokio::net::UnixStream::connect(&path).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let owner = std::fs::metadata(&path)
+        .expect("the first server bound")
+        .ino();
+
+    tokio::time::timeout(Duration::from_secs(2), serve(path.clone()))
+        .await
+        .expect("the second server gives up instead of taking the socket over");
+
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().ino(),
+        owner,
+        "the socket file is still the first server's"
+    );
+    assert!(
+        tokio::net::UnixStream::connect(&path).await.is_ok(),
+        "and the first server still answers on it"
+    );
+    first.abort();
+    let _ = std::fs::remove_file(&path);
+}

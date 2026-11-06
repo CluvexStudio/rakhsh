@@ -416,6 +416,13 @@ pub struct SpeedResult {
 }
 
 pub async fn serve(path: String) {
+    if tokio::net::UnixStream::connect(&path).await.is_ok() {
+        warn!(
+            "control socket {path} is already served by another running rakhsh, so this one \
+             has no status socket; give it its own with control_socket"
+        );
+        return;
+    }
     let _ = std::fs::remove_file(&path);
     if let Some(dir) = std::path::Path::new(&path).parent() {
         let _ = std::fs::create_dir_all(dir);

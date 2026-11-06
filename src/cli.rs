@@ -923,6 +923,7 @@ pub(crate) fn proxy_block(listen: Option<&str>, split_iran: bool, with_tunnel: b
 fn init_node(listen: &str) {
     println!("# rakhsh standalone node — SOCKS5+HTTP proxy, direct out, no tunnel peer");
     println!("role = \"node\"");
+    println!("control_socket = \"/run/rakhsh-node.sock\"");
     print!("{}", proxy_block(Some(listen), false, false));
 }
 
