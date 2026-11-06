@@ -1275,7 +1275,6 @@ pub async fn connect(
     }
 }
 
-use std::ffi::CString;
 use std::os::fd::{FromRawFd, OwnedFd};
 
 #[repr(C)]
@@ -1468,71 +1467,13 @@ struct L2Params {
     src_ip: Ipv4Addr,
 }
 
-fn parse_mac(s: &str) -> Option<[u8; 6]> {
-    let mut m = [0u8; 6];
-    let parts: Vec<&str> = s.trim().split(':').collect();
-    if parts.len() != 6 {
-        return None;
-    }
-    for (i, p) in parts.iter().enumerate() {
-        m[i] = u8::from_str_radix(p, 16).ok()?;
-    }
-    Some(m)
-}
-
-fn arp_lookup(ip: Ipv4Addr) -> Option<[u8; 6]> {
-    let arp = std::fs::read_to_string("/proc/net/arp").ok()?;
-    let ips = ip.to_string();
-    for line in arp.lines().skip(1) {
-        let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() >= 4 && f[0] == ips {
-            return parse_mac(f[3]);
-        }
-    }
-    None
-}
-
 fn discover_l2(anchor: Ipv4Addr) -> Result<L2Params> {
-    let src_ip = src_ip_for(anchor)?;
-    let route = std::fs::read_to_string("/proc/net/route").context("read /proc/net/route")?;
-    let mut iface = None;
-    let mut gw_ip = None;
-    for line in route.lines().skip(1) {
-        let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() >= 3 && f[1] == "00000000" {
-            if let Ok(g) = u32::from_str_radix(f[2], 16) {
-                gw_ip = Some(Ipv4Addr::from(g.to_le_bytes()));
-                iface = Some(f[0].to_string());
-                break;
-            }
-        }
-    }
-    let iface = iface.context("no default route")?;
-    let gw_ip = gw_ip.context("no default gateway")?;
-    let ifindex = unsafe { libc::if_nametoindex(CString::new(iface.clone())?.as_ptr()) } as i32;
-    if ifindex == 0 {
-        return Err(anyhow!("interface {iface} has no index"));
-    }
-    let src_mac = parse_mac(
-        &std::fs::read_to_string(format!("/sys/class/net/{iface}/address"))
-            .with_context(|| format!("read MAC of {iface}"))?,
-    )
-    .context("parse local MAC")?;
-    let gw_mac = match arp_lookup(gw_ip) {
-        Some(m) => m,
-        None => {
-            if let Ok(u) = std::net::UdpSocket::bind("0.0.0.0:0") {
-                let _ = u.send_to(&[0u8; 1], SocketAddrV4::new(gw_ip, 9));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            arp_lookup(gw_ip).context("gateway MAC not resolvable (ARP)")?
-        }
-    };
+    let link = shabdiz::carrier::l2::discover(anchor)?;
     Ok(L2Params {
-        ifindex,
-        src_mac,
-        gw_mac,
-        src_ip,
+        ifindex: link.ifindex,
+        src_mac: link.src_mac,
+        gw_mac: link.gateway_mac,
+        src_ip: link.src_ip,
     })
 }
 
