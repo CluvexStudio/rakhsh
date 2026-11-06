@@ -17,6 +17,7 @@ pub const HEADER: &str = "  carrier       state              goodput  note";
 const HANDSHAKE_BUDGET: Duration = Duration::from_secs(6);
 const DGRAM_BUDGET: Duration = Duration::from_secs(12);
 const DGRAM_BURST: usize = 32;
+const DGRAM_IDLE: Duration = Duration::from_secs(1);
 const RECORD: usize = 16 * 1024;
 const SETTLE: Duration = Duration::from_millis(400);
 
@@ -193,7 +194,7 @@ async fn push(enc: &Enc, tx: &mut BoxTx, seconds: u64) -> Result<u64> {
 }
 
 async fn drain(enc: &Enc, rx: &mut BoxRx, seconds: u64) -> u64 {
-    let until = Instant::now() + Duration::from_secs(seconds) + SETTLE;
+    let until = Instant::now() + Duration::from_secs(seconds) + HANDSHAKE_BUDGET + SETTLE;
     let mut got = 0u64;
     while Instant::now() < until {
         let left = until.saturating_duration_since(Instant::now());
@@ -251,12 +252,16 @@ async fn accept_dgram(
     )
     .await
     .context("the peer never completed a shabdiz handshake")??;
-    let until = Instant::now() + Duration::from_secs(seconds) + SETTLE;
+    let hard = Instant::now() + Duration::from_secs(seconds) + DGRAM_BUDGET;
     let mut got = 0u64;
     let mut batch = Vec::with_capacity(64);
-    while Instant::now() < until {
-        let left = until.saturating_duration_since(Instant::now());
-        match tokio::time::timeout(left, handle.recv_batch(&mut batch, 64)).await {
+    loop {
+        let left = hard.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let wait = if got == 0 { left } else { DGRAM_IDLE.min(left) };
+        match tokio::time::timeout(wait, handle.recv_batch(&mut batch, 64)).await {
             Ok(0) | Err(_) => break,
             Ok(_) => got += batch.iter().map(|(_, p)| p.len() as u64).sum::<u64>(),
         }
