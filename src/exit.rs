@@ -80,16 +80,10 @@ pub async fn run(cfg: Config) -> Result<()> {
     if let Some(h) = &hub {
         metrics.bind_hub(h);
     }
-    let carrier = cfg.carrier.clone().unwrap_or_else(|| "tcp".into());
     let serve: links::Serve = {
         let (l3, hub) = (l3.clone(), hub.clone());
-        Arc::new(move |lane_id, tx, rx, enc| {
-            let (l3, hub, carrier, gauge) = (
-                l3.clone(),
-                hub.clone(),
-                carrier.clone(),
-                stream_gauge.clone(),
-            );
+        Arc::new(move |lane_id, carrier, tx, rx, enc| {
+            let (l3, hub, gauge) = (l3.clone(), hub.clone(), stream_gauge.clone());
             Box::pin(async move {
                 if let Some(m) = crate::status::get() {
                     m.lane_up(lane_id, &carrier);

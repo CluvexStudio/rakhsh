@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::noise::{Enc, Keys};
 
 pub type Serve = Arc<
-    dyn Fn(u64, BoxTx, BoxRx, Enc) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
+    dyn Fn(u64, String, BoxTx, BoxRx, Enc) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
         + Send
         + Sync,
 >;
@@ -195,7 +195,13 @@ pub async fn listen(cfg: &Config, keys: Keys, serve: Serve) -> Result<()> {
             .await
             .with_context(|| format!("listening on {}", p.label()))?;
         info!("listening for lanes on {}", p.label());
-        let (serve, ids, label, timeout) = (serve.clone(), ids.clone(), p.label(), s.timeout);
+        let (serve, ids, label, kind, timeout) = (
+            serve.clone(),
+            ids.clone(),
+            p.label(),
+            p.kind.clone(),
+            s.timeout,
+        );
         let keys = keys.clone();
         tasks.push(tokio::spawn(async move {
             loop {
@@ -208,7 +214,8 @@ pub async fn listen(cfg: &Config, keys: Keys, serve: Serve) -> Result<()> {
                     }
                 };
                 let lane_id = ids.fetch_add(1, SeqCst);
-                let (serve, label, keys) = (serve.clone(), label.clone(), keys.clone());
+                let (serve, label, kind, keys) =
+                    (serve.clone(), label.clone(), kind.clone(), keys.clone());
                 tokio::spawn(async move {
                     let (enc, admitted) = match tokio::time::timeout(
                         timeout,
@@ -229,7 +236,7 @@ pub async fn listen(cfg: &Config, keys: Keys, serve: Serve) -> Result<()> {
                         "lane {lane_id} authenticated via {label} as {}",
                         keys.admitted_name(admitted)
                     );
-                    if let Err(e) = serve(lane_id, tx, rx, enc).await {
+                    if let Err(e) = serve(lane_id, kind, tx, rx, enc).await {
                         warn!("lane {lane_id} ended: {e:#}");
                     }
                 });
@@ -442,7 +449,7 @@ pub async fn dial_lanes(cfg: &Config, keys: Keys, serve: Serve) -> Result<()> {
                     info!("lane {lane_id} up via {}", d.points[idx].label());
                     let started = Instant::now();
                     let outcome = {
-                        let fut = serve(lane_id, est.tx, est.rx, est.enc);
+                        let fut = serve(lane_id, d.points[idx].kind.clone(), est.tx, est.rx, est.enc);
                         tokio::pin!(fut);
                         tokio::select! {
                             r = &mut fut => Outcome::Ended(r),

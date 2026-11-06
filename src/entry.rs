@@ -112,11 +112,10 @@ pub async fn run(cfg: Config) -> Result<()> {
         });
     }
 
-    let carrier = cfg.carrier.clone().unwrap_or_else(|| "tcp".into());
     let serve: links::Serve = {
         let (pool, l3) = (pool.clone(), l3.clone());
-        Arc::new(move |lane_id, tx, rx, enc| {
-            let (pool, l3, carrier) = (pool.clone(), l3.clone(), carrier.clone());
+        Arc::new(move |lane_id, carrier, tx, rx, enc| {
+            let (pool, l3) = (pool.clone(), l3.clone());
             Box::pin(async move {
                 if let Some(m) = crate::status::get() {
                     m.lane_up(lane_id, &carrier);
