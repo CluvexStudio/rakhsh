@@ -19,7 +19,8 @@ use crate::carrier::tls;
 
 const RENEW_BEFORE: Duration = Duration::from_secs(30 * 24 * 3600);
 const CHECK_EVERY: Duration = Duration::from_secs(12 * 3600);
-const RETRY_AFTER: Duration = Duration::from_secs(600);
+const RETRY_FIRST: Duration = Duration::from_secs(600);
+const RETRY_MAX: Duration = Duration::from_secs(12 * 3600);
 const CHALLENGE_PATH: &str = "/.well-known/acme-challenge/";
 
 #[derive(Clone, Debug)]
@@ -154,6 +155,7 @@ pub fn start(cfg: &Acme) -> Result<Arc<Resolver>> {
 }
 
 async fn keep(cfg: Acme, resolver: Arc<Resolver>) {
+    let mut backoff = RETRY_FIRST;
     loop {
         let left = match remaining(&cfg) {
             Ok(Some(d)) => Some(d),
@@ -168,15 +170,19 @@ async fn keep(cfg: Acme, resolver: Arc<Resolver>) {
             match issue(&cfg).await {
                 Ok(ck) => {
                     resolver.install(ck);
+                    backoff = RETRY_FIRST;
                     info!("acme: certificate for {} installed", cfg.domain);
                 }
                 Err(e) => {
                     warn!(
-                        "acme: could not get a certificate for {}: {e:#} — retrying in {}s",
+                        "acme: could not get a certificate for {}: {e:#} — trying again in {} \
+                         minutes. A certificate authority counts failures against the name, so \
+                         each attempt waits longer than the last.",
                         cfg.domain,
-                        RETRY_AFTER.as_secs()
+                        backoff.as_secs() / 60
                     );
-                    tokio::time::sleep(RETRY_AFTER).await;
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(RETRY_MAX);
                     continue;
                 }
             }

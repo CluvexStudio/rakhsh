@@ -217,3 +217,25 @@ fn inspecting_a_config_never_reaches_for_a_certificate() {
         "the inspect-only guard has to come before anything that talks to the authority"
     );
 }
+
+#[test]
+fn a_failing_name_is_retried_slowly_enough_not_to_be_rate_limited() {
+    let mut attempts = 0;
+    let mut elapsed = Duration::ZERO;
+    let mut backoff = RETRY_FIRST;
+    while elapsed < Duration::from_secs(3600) {
+        attempts += 1;
+        elapsed += backoff;
+        backoff = (backoff * 2).min(RETRY_MAX);
+    }
+    assert!(
+        attempts <= 5,
+        "a certificate authority allows 5 failed validations per name per hour; \
+         this schedule makes {attempts}, so a wrong dns record would lock the user out"
+    );
+    assert!(RETRY_MAX > RETRY_FIRST, "the backoff has to grow");
+    assert!(
+        RETRY_MAX <= CHECK_EVERY,
+        "waiting longer between retries than between ordinary checks would stall renewal"
+    );
+}
