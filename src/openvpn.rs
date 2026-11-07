@@ -18,6 +18,7 @@ const COMPRESS_BYTE: usize = 1;
 const CONTROL_DEFAULT: usize = 1250;
 
 const GRE_CARRIED: usize = 1427;
+const ESP_CARRIED: usize = 1437;
 const L2_CARRIED: usize = 1405;
 const UDP_CARRIED: usize = 1437;
 const TCP_CARRIED: usize = 1365;
@@ -300,6 +301,7 @@ impl Plan {
 pub fn carried_payload(carrier: &str) -> Option<usize> {
     match carrier {
         "shabdiz-gre" => Some(GRE_CARRIED),
+        "shabdiz-esp" => Some(ESP_CARRIED),
         "shabdiz-l2" => Some(L2_CARRIED),
         "shabdiz-udp" => Some(UDP_CARRIED),
         "shabdiz-tcp" => Some(TCP_CARRIED),

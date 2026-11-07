@@ -91,6 +91,7 @@ fn the_tun_mtu_is_what_the_carrier_carries_minus_what_openvpn_adds() {
     let ov = OpenVpn::parse_spec("udp:1194").unwrap();
     for (carrier, carried) in [
         ("shabdiz-gre", 1427usize),
+        ("shabdiz-esp", 1437),
         ("shabdiz-l2", 1405),
         ("shabdiz-udp", 1437),
         ("shabdiz-tcp", 1365),

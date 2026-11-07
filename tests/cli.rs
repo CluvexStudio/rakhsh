@@ -140,6 +140,7 @@ fn init_writes_nothing_that_check_calls_inert() {
         ("quic", "0.0.0.0:8443=127.0.0.1:8443"),
         ("faketcp", "0.0.0.0:8443=127.0.0.1:8443"),
         ("shabdiz-gre", "0.0.0.0:1194=127.0.0.1:1194/udp"),
+        ("shabdiz-esp", "0.0.0.0:1194=127.0.0.1:1194/udp"),
         ("shabdiz-udp", "0.0.0.0:1194=127.0.0.1:1194/udp"),
     ] {
         let (ok, said) = rakhsh(&[

@@ -23,7 +23,13 @@ const SETTLE: Duration = Duration::from_millis(400);
 
 pub const STREAM_CARRIERS: &[&str] = &["tcp", "tls", "ws", "wss", "quic", "quicv2", "kcp"];
 pub const RAW_CARRIERS: &[&str] = &["faketcp", "l2tcp", "icmp"];
-pub const DATAGRAM_CARRIERS: &[&str] = &["shabdiz-udp", "shabdiz-tcp", "shabdiz-gre", "shabdiz-l2"];
+pub const DATAGRAM_CARRIERS: &[&str] = &[
+    "shabdiz-udp",
+    "shabdiz-tcp",
+    "shabdiz-gre",
+    "shabdiz-esp",
+    "shabdiz-l2",
+];
 
 pub const PROTOCOLS: &[(u8, &str)] = &[
     (4, "IPv4-in-IPv4"),
@@ -151,14 +157,14 @@ pub fn known(name: &str) -> bool {
 }
 
 pub fn needs_root(name: &str) -> bool {
-    RAW_CARRIERS.contains(&name) || name == "shabdiz-gre" || name == "shabdiz-l2"
+    RAW_CARRIERS.contains(&name) || matches!(name, "shabdiz-gre" | "shabdiz-esp" | "shabdiz-l2")
 }
 
 pub fn needs_public_address(name: &str) -> bool {
-    name == "shabdiz-gre"
+    matches!(name, "shabdiz-gre" | "shabdiz-esp")
 }
 
-pub fn behind_nat(peer: &str) -> Option<Ipv4Addr> {
+pub fn private_source(peer: &str) -> Option<Ipv4Addr> {
     let host = peer.rsplit_once(':').map_or(peer, |(h, _)| h);
     let addr: Ipv4Addr = host.parse().ok()?;
     if addr.is_private() || addr.is_loopback() {
@@ -288,18 +294,29 @@ async fn accept_dgram(
 }
 
 pub async fn measure(base: &Config, carrier: &str, peer: &str, seconds: u64) -> Verdict {
-    if needs_public_address(carrier) {
-        if let Some(local) = behind_nat(peer) {
-            return Verdict::refused(
-                carrier,
-                format!(
-                    "this host is {local} behind NAT, and this carrier has no ports for NAT to \
-                     translate, so the far end's packets can never be routed back here; it needs \
-                     a public address on both ends"
-                ),
-            );
+    let mut v = measure_inner(base, carrier, peer, seconds).await;
+    if !v.usable() && needs_public_address(carrier) {
+        if let Some(local) = private_source(peer) {
+            v.note = nat_note(local, &v.note);
         }
     }
+    v
+}
+
+fn nat_note(local: Ipv4Addr, had: &str) -> String {
+    let because = if had.is_empty() {
+        String::new()
+    } else {
+        format!(" ({had})")
+    };
+    format!(
+        "this host sends from {local}, a translated address{because}. On a home or mobile \
+         connection that is the reason: with no ports to translate, the far end cannot address \
+         one host behind a shared one. One address per host, as a cloud instance has, works."
+    )
+}
+
+async fn measure_inner(base: &Config, carrier: &str, peer: &str, seconds: u64) -> Verdict {
     if crate::dgram::is_datagram(carrier) {
         return measure_dgram(base, carrier, peer, seconds).await;
     }
@@ -535,7 +552,7 @@ impl Report {
             },
             addr(0)
         ));
-        if one_lane || matches!(carrier, "shabdiz-gre" | "shabdiz-l2") {
+        if one_lane || matches!(carrier, "shabdiz-gre" | "shabdiz-esp" | "shabdiz-l2") {
             s.push_str(&format!(
                 "peer_ip = \"{peer}\"\n# this carrier forges its own packets, so the far end \
                  needs peer_ip pointed back here\n"

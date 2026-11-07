@@ -165,7 +165,13 @@ fn a_repeated_node_name_is_refused() {
 
 #[test]
 fn a_datagram_carrier_is_refused_rather_than_generated_broken() {
-    for carrier in ["shabdiz-gre", "shabdiz-l2", "shabdiz-udp", "shabdiz-tcp"] {
+    for carrier in [
+        "shabdiz-gre",
+        "shabdiz-esp",
+        "shabdiz-l2",
+        "shabdiz-udp",
+        "shabdiz-tcp",
+    ] {
         let mut s = spec(&["de=1.1.1.1"], &["ir=3.3.3.3"], Dial::Exit);
         s.carrier = carrier.into();
         let err = plan(&s).unwrap_err().to_string();

@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use tokio::net::UdpSocket;
 use tracing::{info, warn};
 
-use shabdiz::carrier::{gre, l2, tcp::Tcp, udp::Udp, Carrier};
+use shabdiz::carrier::{esp, gre, l2, tcp::Tcp, udp::Udp, Carrier};
 use shabdiz::handshake;
 use shabdiz::session::{self, Handle, Role};
 
@@ -21,6 +21,7 @@ const FLOW_IDLE: Duration = Duration::from_secs(120);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Gre,
+    Esp,
     L2,
     Udp,
     Tcp,
@@ -29,6 +30,7 @@ enum Kind {
 fn kind_of(carrier: &str) -> Option<Kind> {
     match carrier {
         "shabdiz-gre" => Some(Kind::Gre),
+        "shabdiz-esp" => Some(Kind::Esp),
         "shabdiz-l2" => Some(Kind::L2),
         "shabdiz-udp" => Some(Kind::Udp),
         "shabdiz-tcp" => Some(Kind::Tcp),
@@ -131,6 +133,24 @@ pub fn describe(cfg: &Config) -> Vec<String> {
             );
         }
     }
+    if kind == Kind::Esp {
+        out.push(
+            "  IP protocol 50, shaped as an ESP packet (SPI and sequence number). Measured on \
+             the Iranian path: it crossed where protocol 47 was dropped outright, because \
+             blocking ESP would break corporate IPsec."
+                .to_string(),
+        );
+        out.push(
+            "  needs root (CAP_NET_RAW), and has no ports, so both ends need a public address — \
+             it cannot cross NAT. Either end may open the flow."
+                .to_string(),
+        );
+        if cfg.peer_ip.is_none() && cfg.tunnel_connect.is_none() {
+            out.push(
+                "  ERROR: set peer_ip (or tunnel_connect) so this end knows where to send".into(),
+            );
+        }
+    }
     if kind == Kind::L2 {
         let (a, b) = shabdiz_ports(&cfg.token);
         out.push(format!(
@@ -216,7 +236,7 @@ pub fn validate(cfg: &Config) -> Result<()> {
         return Ok(());
     };
     one_udp_forward(cfg)?;
-    if matches!(kind, Kind::Gre | Kind::L2) {
+    if matches!(kind, Kind::Gre | Kind::Esp | Kind::L2) {
         peer_addr(cfg, cfg.carrier.as_deref().unwrap_or("shabdiz"))?;
     }
     Ok(())
@@ -440,8 +460,27 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
                 shabdiz::carrier::BATCH
             );
             Ok(Arc::new(
-                gre::Gre::open(peer_ip, local, peer, mtu)
+                gre::open(peer_ip, local, peer, mtu)
                     .context("opening the GRE carrier (needs root)")?,
+            ))
+        }
+        Kind::Esp => {
+            let peer_ip = peer_addr(cfg, "shabdiz-esp")?;
+            let (entry_spi, exit_spi) = esp::spis(cfg.token.as_bytes());
+            let (local, peer) = if cfg.role == "entry" {
+                (entry_spi, exit_spi)
+            } else {
+                (exit_spi, entry_spi)
+            };
+            let mtu = esp::path_mtu(1500);
+            info!(
+                "shabdiz-esp: {peer_ip} on IP protocol 50, spi {local:#010x} <- {peer:#010x}, \
+                 mtu {mtu}, up to {} datagrams per syscall",
+                shabdiz::carrier::BATCH
+            );
+            Ok(Arc::new(
+                esp::open(peer_ip, local, peer, mtu)
+                    .context("opening the ESP carrier (needs root)")?,
             ))
         }
         Kind::L2 => {

@@ -754,8 +754,8 @@ fn install(table: &str, iptables_rules: &[Vec<String>], nft_chains: &str) {
         return;
     }
     tracing::warn!(
-        "raw: could not install the {table} rule with iptables or nft, so the kernel will \
-         answer this carrier's packets on its own; run as root on a host with iptables or nftables"
+        "raw: neither iptables nor nft worked for {table}, so the kernel answers this carrier's \
+         packets on its own"
     );
 }
 

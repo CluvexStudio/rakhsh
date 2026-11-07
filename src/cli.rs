@@ -801,7 +801,7 @@ fn init(args: &InitArgs) -> Result<()> {
     let datagram = carrier.starts_with("shabdiz-");
     let raw_peer = matches!(
         carrier,
-        "faketcp" | "l2tcp" | "icmp" | "spoof" | "shabdiz-gre" | "shabdiz-l2"
+        "faketcp" | "l2tcp" | "icmp" | "spoof" | "shabdiz-gre" | "shabdiz-esp" | "shabdiz-l2"
     );
     let (dials_peer_ip, listens_peer_ip) = if raw_peer {
         let listens = match far_ip {

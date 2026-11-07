@@ -129,7 +129,7 @@ so_sndbuf = 4194304
 carrier = "wss"
 # tcp (default) · tls · ws · wss · quic · quicv2 · kcp
 #   · faketcp · icmp · spoof · l2tcp
-#   · shabdiz-gre · shabdiz-l2 · shabdiz-udp · shabdiz-tcp
+#   · shabdiz-gre · shabdiz-esp · shabdiz-l2 · shabdiz-udp · shabdiz-tcp
 #
 # Both ends must name the same one. `rakhsh doctor` measures which of them
 # actually cross a path, and writes a config with the survivors in order.
@@ -210,7 +210,7 @@ decoy = true
 # peer_ip = "203.0.113.9"
 # The peer's address on the wire. Required on BOTH ends by the raw carriers,
 # because a forged packet has no connection for the kernel to learn it from.
-# A shabdiz-gre or shabdiz-l2 config needs it too.
+# A shabdiz-gre, shabdiz-esp or shabdiz-l2 config needs it too.
 
 # reliability = "quic"
 # quic (default) · kcp. What runs on top of the forged packets to recover from

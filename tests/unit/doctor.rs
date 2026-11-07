@@ -331,28 +331,60 @@ fn every_protocol_number_is_named_and_distinct() {
 }
 
 #[tokio::test]
-async fn a_portless_carrier_behind_nat_is_refused_with_the_reason() {
-    let Some(local) = behind_nat("203.0.113.1") else {
-        eprintln!("this host has a public route; nothing to check");
+async fn a_portless_carrier_that_fails_behind_nat_explains_itself() {
+    let Some(local) = private_source("203.0.113.1") else {
+        eprintln!("this host routes out from a public address; nothing to check");
         return;
     };
     let v = measure(&base(), "shabdiz-gre", "203.0.113.1:7901", 1).await;
-    assert!(
-        !v.usable() && !v.reached,
-        "it cannot work, so it must not try"
-    );
-    for part in [&local.to_string(), "no ports", "public address"] {
-        assert!(
-            v.note.contains(part),
-            "the note must explain why, not just time out: {}",
-            v.note
-        );
+    if !v.usable() {
+        for part in [&local.to_string(), "no ports", "home or mobile"] {
+            assert!(
+                v.note.contains(part),
+                "a failure behind NAT must say why, not just time out: {}",
+                v.note
+            );
+        }
     }
+    assert!(
+        v.usable() || !v.note.is_empty(),
+        "a cloud instance sends from a translated address too and this carrier works there, so \
+         the measurement decides and only a failure carries the reason"
+    );
 
     let other = measure(&base(), "shabdiz-udp", "127.0.0.1:1", 1).await;
     assert!(
-        !other.note.contains("public address"),
-        "a carrier with ports is unaffected: {}",
+        !other.note.contains("home or mobile"),
+        "a carrier with ports is never blamed on NAT: {}",
         other.note
+    );
+}
+
+#[test]
+fn every_datagram_carrier_is_wired_through_the_whole_program() {
+    for name in DATAGRAM_CARRIERS {
+        assert!(known(name), "{name} is not known to the doctor");
+        assert!(
+            crate::dgram::is_datagram(name),
+            "{name} is in DATAGRAM_CARRIERS but dgram::kind_of does not map it, so `run` would \
+             refuse it"
+        );
+        assert!(
+            crate::openvpn::carried_payload(name).is_some(),
+            "{name} has no carried payload size, so an OpenVPN tun_mtu over it would be wrong"
+        );
+        let forges = needs_root(name);
+        assert_eq!(
+            forges,
+            !matches!(*name, "shabdiz-udp" | "shabdiz-tcp"),
+            "{name}: only the socket-based carriers run unprivileged"
+        );
+        if needs_public_address(name) {
+            assert!(forges, "{name} cannot need a public address but not root");
+        }
+    }
+    assert!(
+        DATAGRAM_CARRIERS.contains(&"shabdiz-esp"),
+        "the ESP carrier is the fallback for a path that filters protocol 47"
     );
 }
