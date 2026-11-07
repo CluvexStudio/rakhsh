@@ -8,8 +8,9 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/CluvexStudio/rakhsh"
 
 [features]
-default = ["mimalloc"]
+default = ["mimalloc", "acme"]
 mimalloc = ["dep:mimalloc"]
+acme = ["dep:instant-acme", "dep:x509-parser"]
 
 [[bin]]
 name = "rakhsh"
@@ -43,6 +44,8 @@ rustls = { version = "=0.23.46", default-features = false, features = ["ring", "
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls-pki-types = "=1.15.1"
 rcgen = "=0.14.10"
+instant-acme = { version = "=0.8.5", default-features = false, features = ["ring", "hyper-rustls", "rcgen", "x509-parser"], optional = true }
+x509-parser = { version = "=0.18.1", optional = true }
 tokio-tungstenite = "=0.30.0"
 quinn = { version = "=0.11.12", default-features = false, features = ["runtime-tokio","rustls-ring","log"] }
 tokio_kcp = "=0.9.8"

@@ -279,7 +279,8 @@ pub async fn run() -> Result<()> {
             }
         }
         Cmd::Check { config } => {
-            let cfg = config::Config::load(&config)?;
+            let mut cfg = config::Config::load(&config)?;
+            cfg.inspect_only = true;
             entry::validate(&cfg)?;
             if cfg.role == "node" {
                 println!("role node — a proxy and router on this host, with no tunnel peer");
@@ -328,6 +329,7 @@ pub async fn run() -> Result<()> {
                     );
                 }
             }
+            acme_report(&cfg)?;
             for f in &cfg.forward {
                 f.listen.parse::<std::net::SocketAddr>().with_context(|| {
                     format!(
@@ -1126,4 +1128,70 @@ pub(crate) fn getrandom(buf: &mut [u8]) {
         let n = buf.len().min(priv_bytes.len());
         buf[..n].copy_from_slice(&priv_bytes[..n]);
     }
+}
+
+#[cfg(feature = "acme")]
+fn acme_report(cfg: &config::Config) -> Result<()> {
+    let names: Vec<(&str, &Option<String>)> = std::iter::once(("", &cfg.acme_domain))
+        .chain(
+            cfg.link
+                .iter()
+                .map(|l| (l.carrier.as_str(), &l.acme_domain)),
+        )
+        .filter(|(_, d)| d.is_some())
+        .collect();
+    if names.is_empty() {
+        return Ok(());
+    }
+    if cfg.cert_path.is_some() || cfg.key_path.is_some() {
+        bail!("set either acme_domain or cert_path/key_path, not both");
+    }
+    let tls_somewhere = matches!(cfg.carrier.as_deref(), Some("tls" | "wss"))
+        || cfg
+            .link
+            .iter()
+            .any(|l| matches!(l.carrier.as_str(), "tls" | "wss"));
+    for (_, domain) in &names {
+        let domain = domain.as_deref().unwrap_or_default();
+        let a = crate::acme::Acme::from_config(
+            domain,
+            &cfg.acme_email,
+            &cfg.acme_dir,
+            cfg.acme_port,
+            cfg.acme_staging,
+        )?;
+        println!("acme {} from {}", a.domain, a.directory());
+        println!(
+            "  port {} must be free on this host and reachable from the internet, and {} must \
+             already resolve here",
+            a.port, a.domain
+        );
+        println!("  files: {:?} and {:?}", a.cert_file(), a.key_file());
+        match crate::acme::remaining(&a) {
+            Ok(Some(d)) => println!("  stored certificate has {} days left", d.as_secs() / 86400),
+            Ok(None) => println!("  no certificate stored yet — one is fetched on first start"),
+            Err(e) => println!("  WARNING: the stored certificate could not be read: {e:#}"),
+        }
+        if a.staging {
+            println!(
+                "  WARNING: acme_staging is on, so the certificate is from Let's Encrypt's test \
+                 authority and no browser will trust it. Use it to rehearse, then turn it off."
+            );
+        }
+    }
+    if !tls_somewhere {
+        println!(
+            "  note: no tls or wss carrier is configured, so nothing will present this \
+             certificate."
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "acme"))]
+fn acme_report(cfg: &config::Config) -> Result<()> {
+    if cfg.acme_domain.is_some() || cfg.link.iter().any(|l| l.acme_domain.is_some()) {
+        bail!("acme_domain needs the \"acme\" feature, which this build does not have");
+    }
+    Ok(())
 }

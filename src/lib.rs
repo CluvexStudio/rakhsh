@@ -1,3 +1,5 @@
+#[cfg(feature = "acme")]
+mod acme;
 mod carrier;
 pub mod cli;
 mod config;

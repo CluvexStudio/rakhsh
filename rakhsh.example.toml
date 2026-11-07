@@ -156,6 +156,36 @@ decoy = true
 # self-signed pair derived from `sni`. Both or neither. `rakhsh check` fails if
 # the files are not readable, so they stay commented here.
 
+# acme_domain = "vpn.example.com"
+# Get a real certificate for this name from Let's Encrypt and keep it renewed,
+# instead of supplying cert_path/key_path by hand. Set one or the other, never
+# both. The name must already resolve to this host. Read by the listening side
+# of tls and wss.
+#
+# The listener comes up at once with a self-signed certificate and swaps in the
+# real one as soon as it is issued, so a slow or failed issuance never stops the
+# tunnel. Renewal happens in the background, 30 days before expiry, with no
+# restart.
+
+# acme_email = "you@example.com"
+# Where the authority sends expiry warnings. Optional, and worth setting.
+
+# acme_dir = "/var/lib/rakhsh/acme"
+# Where the account key, certificate and private key are kept, mode 0700. The
+# certificate survives restarts, so a rebooting host does not ask for a new one
+# every time and run into the authority's rate limit.
+
+# acme_port = 80
+# The port the http-01 challenge is answered on. It must be free on this host
+# and reachable from the internet for the few seconds an issuance takes; the
+# authority always connects to port 80 first, so a different port only works
+# behind something that forwards to it.
+
+# acme_staging = false
+# Use Let's Encrypt's test authority instead of the real one. Its certificates
+# are not trusted by anything, but its rate limits are generous — rehearse a new
+# setup with this on, then turn it off.
+
 # tls_fingerprint = "chrome"
 # chrome (default) · firefox · rustls. Which client hello to imitate. Read by
 # the dialling side only.
@@ -462,6 +492,7 @@ addr = "0.0.0.0:7443"
 # Optional per-link overrides, each exactly as documented above:
 #   sni · ws_path · ws_credential · decoy · edge_ip · tls_fingerprint
 #   tls_frag · cert_path · key_path · quic_mask · quic_version · reliability
+#   acme_domain · acme_email · acme_dir · acme_port · acme_staging
 #   pace_burst · pace_gap_us · pace_pps · pace_auto
 sni = "www.microsoft.com"
 quic_mask = true

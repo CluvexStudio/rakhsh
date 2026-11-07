@@ -44,6 +44,11 @@ pub struct Config {
     pub decoy: Option<bool>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
+    pub acme_domain: Option<String>,
+    pub acme_email: Option<String>,
+    pub acme_dir: Option<String>,
+    pub acme_port: Option<u16>,
+    pub acme_staging: Option<bool>,
 
     pub tls_fingerprint: Option<String>,
     pub tls_frag: Option<usize>,
@@ -65,6 +70,8 @@ pub struct Config {
     pub quota_state: Option<String>,
     #[serde(skip)]
     pub source: Option<std::path::PathBuf>,
+    #[serde(skip)]
+    pub inspect_only: bool,
 
     pub dns: Option<DnsCfg>,
 
@@ -245,6 +252,11 @@ pub struct Link {
     pub pace_auto: Option<bool>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
+    pub acme_domain: Option<String>,
+    pub acme_email: Option<String>,
+    pub acme_dir: Option<String>,
+    pub acme_port: Option<u16>,
+    pub acme_staging: Option<bool>,
     pub quic_mask: Option<bool>,
     pub quic_version: Option<u32>,
     pub reliability: Option<String>,
@@ -297,6 +309,11 @@ impl Config {
             pace_auto,
             cert_path,
             key_path,
+            acme_domain,
+            acme_email,
+            acme_dir,
+            acme_port,
+            acme_staging,
             quic_mask,
             quic_version,
             reliability

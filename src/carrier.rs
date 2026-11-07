@@ -199,6 +199,35 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> FrameRx for WsRx<S> {
     }
 }
 
+#[cfg(feature = "acme")]
+fn server_tls(cfg: &crate::config::Config, sni: &str) -> Result<TlsAcceptor> {
+    let Some(domain) = cfg.acme_domain.as_deref() else {
+        return tls::acceptor(sni, &cfg.cert_path, &cfg.key_path);
+    };
+    if cfg.inspect_only {
+        return tls::acceptor(domain, &None, &None);
+    }
+    if cfg.cert_path.is_some() || cfg.key_path.is_some() {
+        bail!("set either acme_domain or cert_path/key_path, not both");
+    }
+    let acme = crate::acme::Acme::from_config(
+        domain,
+        &cfg.acme_email,
+        &cfg.acme_dir,
+        cfg.acme_port,
+        cfg.acme_staging,
+    )?;
+    tls::acceptor_resolved(crate::acme::start(&acme)?)
+}
+
+#[cfg(not(feature = "acme"))]
+fn server_tls(cfg: &crate::config::Config, sni: &str) -> Result<TlsAcceptor> {
+    if cfg.acme_domain.is_some() {
+        bail!("acme_domain needs the \"acme\" feature, which this build does not have");
+    }
+    tls::acceptor(sni, &cfg.cert_path, &cfg.key_path)
+}
+
 fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
     tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
         .read_buffer_size(40 * 1024)
@@ -463,10 +492,7 @@ impl Carrier {
                 let ws = matches!(kind, "ws" | "wss");
                 let fp = cfg.tls_fingerprint.as_deref().unwrap_or("chrome");
                 let (acceptor, connector) = if tls {
-                    (
-                        Some(tls::acceptor(sni, &cfg.cert_path, &cfg.key_path)?),
-                        Some(tls::connector(fp)?),
-                    )
+                    (Some(server_tls(cfg, sni)?), Some(tls::connector(fp)?))
                 } else {
                     (None, None)
                 };
@@ -878,7 +904,7 @@ pub(crate) fn noverify_connector() -> TlsConnector {
     TlsConnector::from(Arc::new(tls::client_config_noverify()))
 }
 
-mod tls {
+pub(crate) mod tls {
     use super::*;
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
@@ -915,6 +941,18 @@ mod tls {
             .with_no_client_auth()
             .with_single_cert(certs, key)
             .context("building server TLS config")?;
+        cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
+        Ok(TlsAcceptor::from(Arc::new(cfg)))
+    }
+
+    pub fn acceptor_resolved(
+        resolver: Arc<dyn rustls::server::ResolvesServerCert>,
+    ) -> Result<TlsAcceptor> {
+        let mut cfg = rustls::ServerConfig::builder_with_provider(provider())
+            .with_safe_default_protocol_versions()
+            .context("selecting TLS versions")?
+            .with_no_client_auth()
+            .with_cert_resolver(resolver);
         cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
         Ok(TlsAcceptor::from(Arc::new(cfg)))
     }
