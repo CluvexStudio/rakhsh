@@ -1161,6 +1161,12 @@ fn acme_report(cfg: &config::Config) -> Result<()> {
             cfg.acme_staging,
         )?;
         println!("acme {} from {}", a.domain, a.directory());
+        if cfg.role == cfg.dial.as_deref().unwrap_or("exit") {
+            println!(
+                "  note: this side dials, so it never presents a certificate and will not ask \
+                 for one. Put acme_domain on the side that listens."
+            );
+        }
         println!(
             "  port {} must be free on this host and reachable from the internet, and {} must \
              already resolve here",

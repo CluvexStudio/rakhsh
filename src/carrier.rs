@@ -199,12 +199,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> FrameRx for WsRx<S> {
     }
 }
 
+fn dials(cfg: &crate::config::Config) -> bool {
+    cfg.role == cfg.dial.as_deref().unwrap_or("exit")
+}
+
 #[cfg(feature = "acme")]
 fn server_tls(cfg: &crate::config::Config, sni: &str) -> Result<TlsAcceptor> {
     let Some(domain) = cfg.acme_domain.as_deref() else {
         return tls::acceptor(sni, &cfg.cert_path, &cfg.key_path);
     };
-    if cfg.inspect_only {
+    if cfg.inspect_only || dials(cfg) {
         return tls::acceptor(domain, &None, &None);
     }
     if cfg.cert_path.is_some() || cfg.key_path.is_some() {

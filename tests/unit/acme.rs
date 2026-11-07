@@ -239,3 +239,24 @@ fn a_failing_name_is_retried_slowly_enough_not_to_be_rate_limited() {
         "waiting longer between retries than between ordinary checks would stall renewal"
     );
 }
+
+#[test]
+fn only_the_side_that_listens_asks_for_a_certificate() {
+    let src = std::fs::read_to_string("src/carrier.rs").expect("the carrier source is readable");
+    let at = src.find("fn server_tls").expect("the chooser must exist");
+    let body = &src[at..at + 900];
+    let guard = body
+        .find("dials(cfg)")
+        .expect("a dialling side presents no certificate, so it must not ask for one");
+    let start = body
+        .find("acme::start")
+        .expect("the live path must still start acme");
+    assert!(
+        guard < start,
+        "the dialling guard has to come before anything that talks to the authority"
+    );
+    assert!(
+        src.contains(r#"cfg.dial.as_deref().unwrap_or("exit")"#),
+        "the default dialling side has to match the rest of the program"
+    );
+}
