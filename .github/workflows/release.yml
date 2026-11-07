@@ -46,12 +46,14 @@ jobs:
           path: rakhsh
 
       # rakhsh depends on shabdiz by path (../shabdiz), so both trees have to be
-      # side by side. github.token is enough once shabdiz is public; while it is
-      # private it needs a PAT with read access in secrets.SHABDIZ_TOKEN.
+      # side by side. While shabdiz is private, github.token cannot read it:
+      # supply either a read-only deploy key in secrets.SHABDIZ_SSH_KEY or a PAT
+      # in secrets.SHABDIZ_TOKEN. Once shabdiz is public, neither is needed.
       - uses: actions/checkout@v5
         with:
           repository: CluvexStudio/shabdiz
           path: shabdiz
+          ssh-key: ${{ secrets.SHABDIZ_SSH_KEY }}
           token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
 
       - uses: dtolnay/rust-toolchain@stable

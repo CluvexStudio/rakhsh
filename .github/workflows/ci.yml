@@ -32,6 +32,7 @@ jobs:
         with:
           repository: CluvexStudio/shabdiz
           path: shabdiz
+          ssh-key: ${{ secrets.SHABDIZ_SSH_KEY }}
           token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
 
       - uses: dtolnay/rust-toolchain@stable
