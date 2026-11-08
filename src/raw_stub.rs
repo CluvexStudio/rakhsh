@@ -22,6 +22,19 @@ impl RawParams {
             key: blake3::derive_key("rakhsh-raw-v1", token.as_bytes()),
         }
     }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn lane_ports(&self, lane: u64) -> (u16, u16) {
+        let mut h = blake3::Hasher::new_keyed(&self.key);
+        h.update(&lane.to_be_bytes());
+        let k = *h.finalize().as_bytes();
+        let port_a = 20000 + (u16::from_be_bytes([k[6], k[7]]) % 20000);
+        let mut port_b = 20000 + (u16::from_be_bytes([k[8], k[9]]) % 20000);
+        if port_b == port_a {
+            port_b = port_a.wrapping_add(1);
+        }
+        (port_a, port_b)
+    }
 }
 
 #[derive(Clone)]
@@ -44,11 +57,16 @@ pub struct Dial<'a> {
 }
 
 pub async fn connect(
-    _d: Dial<'_>,
-    _initiator: bool,
-    _peer: Option<Ipv4Addr>,
-    _lane: u64,
+    d: Dial<'_>,
+    initiator: bool,
+    peer: Option<Ipv4Addr>,
+    lane: u64,
 ) -> Result<(BoxTx, BoxRx)> {
+    #[cfg(target_os = "windows")]
+    if d.kind == "faketcp" {
+        return crate::windivert_tcp::connect_faketcp(d.params, peer, initiator, lane);
+    }
+    let _ = (&d, initiator, peer, lane);
     bail!(UNSUPPORTED)
 }
 

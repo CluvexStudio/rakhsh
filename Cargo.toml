@@ -55,6 +55,14 @@ reed-solomon-simd = "=3.1.0"
 libc = "=0.2.191"
 rama = { git = "https://github.com/plabayo/rama", rev = "ec92b76", default-features = false, features = ["quic", "rustls", "ring"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+# Raw-packet carriers on Windows need a driver: the kernel blocks crafted TCP
+# from user space. WinDivert is that driver; "static" vendors its SDK so the
+# build is self-contained. GetBestInterface comes from the windows crate.
+windivert = { version = "=0.6.0", features = ["static"] }
+windows = { version = "0.48", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper"] }
+
+
 [profile.release]
 opt-level = 3
 lto = "thin"

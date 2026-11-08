@@ -27,6 +27,8 @@ mod route;
 mod session;
 mod stats;
 mod status;
+#[cfg(target_os = "windows")]
+mod windivert_tcp;
 mod wire;
 mod xui;
 pub use shabdiz;
