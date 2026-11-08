@@ -442,10 +442,16 @@ fn write_private(path: &Path, body: &str) -> Result<()> {
     restrict(path, 0o600)
 }
 
+#[cfg(unix)]
 fn restrict(path: &Path, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
         .with_context(|| format!("restricting {path:?}"))
+}
+
+#[cfg(not(unix))]
+fn restrict(_path: &Path, _mode: u32) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]

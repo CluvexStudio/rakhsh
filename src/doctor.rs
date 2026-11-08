@@ -725,6 +725,7 @@ fn magic(token: &str) -> [u8; PROTO_MAGIC] {
     m
 }
 
+#[cfg(target_os = "linux")]
 fn raw_socket(proto: u8, timeout_ms: i64) -> std::io::Result<std::os::fd::OwnedFd> {
     use std::os::fd::FromRawFd;
     let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, proto as libc::c_int) };
@@ -750,6 +751,7 @@ fn raw_socket(proto: u8, timeout_ms: i64) -> std::io::Result<std::os::fd::OwnedF
     Ok(owned)
 }
 
+#[cfg(target_os = "linux")]
 fn send_protocol(proto: u8, peer: Ipv4Addr, body: &[u8]) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     let fd = raw_socket(proto, 0)?;
@@ -779,6 +781,7 @@ fn send_protocol(proto: u8, peer: Ipv4Addr, body: &[u8]) -> std::io::Result<()> 
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn count_protocol(proto: u8, want: [u8; PROTO_MAGIC], until: Instant) -> std::io::Result<usize> {
     use std::os::fd::AsRawFd;
     let fd = raw_socket(proto, 250)?;
@@ -814,6 +817,12 @@ pub fn protocol_body(token: &str) -> Vec<u8> {
     body
 }
 
+#[cfg(not(target_os = "linux"))]
+pub async fn send_protocols(_token: &str, _peer: Ipv4Addr) -> Vec<(u8, &'static str, String)> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
 pub async fn send_protocols(token: &str, peer: Ipv4Addr) -> Vec<(u8, &'static str, String)> {
     let body = protocol_body(token);
     let mut out = Vec::new();
@@ -828,6 +837,12 @@ pub async fn send_protocols(token: &str, peer: Ipv4Addr) -> Vec<(u8, &'static st
     out
 }
 
+#[cfg(not(target_os = "linux"))]
+pub async fn watch_protocols(_token: &str, _seconds: u64) -> Vec<(u8, usize, String)> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
 pub async fn watch_protocols(token: &str, seconds: u64) -> Vec<(u8, usize, String)> {
     let want = magic(token);
     let until = Instant::now() + Duration::from_secs(seconds);

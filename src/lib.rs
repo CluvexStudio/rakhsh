@@ -17,6 +17,10 @@ mod noise;
 mod openvpn;
 mod proxy;
 mod ramaquic;
+#[cfg(target_os = "linux")]
+mod raw;
+#[cfg(not(target_os = "linux"))]
+#[path = "raw_stub.rs"]
 mod raw;
 mod resume;
 mod route;

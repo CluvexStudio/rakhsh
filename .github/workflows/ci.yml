@@ -63,6 +63,46 @@ jobs:
         working-directory: rakhsh
         run: cargo check -p rakhsh --no-default-features
 
+  # The raw-packet carriers (faketcp, l2tcp, icmp, spoof, and the shabdiz raw
+  # carriers) are Linux-only; the stream carriers, the router and the control
+  # centre build on Windows and macOS. These native runners prove the client
+  # still compiles and tests there with the raw carriers gated out. They need
+  # the shabdiz checkout, so they wait on the same SHABDIZ_SSH_KEY as the rust
+  # job while shabdiz is private.
+  desktop:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: rakhsh
+
+      - uses: actions/checkout@v5
+        with:
+          repository: CluvexStudio/shabdiz
+          path: shabdiz
+          ssh-key: ${{ secrets.SHABDIZ_SSH_KEY }}
+          token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rakhsh
+          key: ${{ matrix.os }}
+
+      - name: Build
+        working-directory: rakhsh
+        run: cargo build -p rakhsh
+
+      - name: Tests
+        working-directory: rakhsh
+        run: cargo test --workspace
+
   panel:
     runs-on: ubuntu-latest
     steps:

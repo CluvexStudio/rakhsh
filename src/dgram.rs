@@ -8,7 +8,9 @@ use std::sync::Mutex;
 use tokio::net::UdpSocket;
 use tracing::{info, warn};
 
-use shabdiz::carrier::{esp, gre, l2, tagged, tcp::Tcp, udp::Udp, Carrier};
+#[cfg(target_os = "linux")]
+use shabdiz::carrier::{esp, gre, l2, tagged};
+use shabdiz::carrier::{tcp::Tcp, udp::Udp, Carrier};
 use shabdiz::handshake;
 use shabdiz::session::{self, Handle, Role};
 
@@ -531,6 +533,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
                 ))
             }
         }
+        #[cfg(target_os = "linux")]
         Kind::Gre => {
             let peer_ip = peer_addr(cfg, "shabdiz-gre").await?;
             let (entry_mac, exit_mac) = gre::macs(cfg.token.as_bytes());
@@ -549,6 +552,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
                     .context("opening the GRE carrier (needs root)")?,
             ))
         }
+        #[cfg(target_os = "linux")]
         Kind::Esp => {
             let peer_ip = peer_addr(cfg, "shabdiz-esp").await?;
             let (entry_spi, exit_spi) = esp::spis(cfg.token.as_bytes());
@@ -568,6 +572,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
                     .context("opening the ESP carrier (needs root)")?,
             ))
         }
+        #[cfg(target_os = "linux")]
         Kind::Tagged => {
             let which = cfg.carrier.as_deref().unwrap_or("shabdiz-ipip");
             let spec = tagged_spec(which).expect("a tagged kind always has a spec");
@@ -591,6 +596,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
                     .with_context(|| format!("opening the {which} carrier (needs root)"))?,
             ))
         }
+        #[cfg(target_os = "linux")]
         Kind::L2 => {
             let peer_ip = peer_addr(cfg, "shabdiz-l2").await?;
             let (a, b) = shabdiz_ports(&cfg.token);
@@ -605,6 +611,11 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
                     .context("opening the layer-2 carrier (needs root)")?,
             ))
         }
+        #[cfg(not(target_os = "linux"))]
+        Kind::Gre | Kind::Esp | Kind::Tagged | Kind::L2 => anyhow::bail!(
+            "this shabdiz raw carrier needs Linux raw sockets; use shabdiz-udp, shabdiz-tcp, \
+             or a stream carrier (quic, wss, tls) on this platform"
+        ),
     }
 }
 

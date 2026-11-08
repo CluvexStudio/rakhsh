@@ -572,6 +572,7 @@ impl CpuSampler {
     }
 }
 
+#[cfg(unix)]
 fn clk_tck() -> u64 {
     let v = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     if v > 0 {
@@ -579,6 +580,11 @@ fn clk_tck() -> u64 {
     } else {
         100
     }
+}
+
+#[cfg(not(unix))]
+fn clk_tck() -> u64 {
+    100
 }
 
 fn self_cpu_ticks() -> u64 {
