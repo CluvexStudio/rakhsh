@@ -27,6 +27,11 @@ pub const DATAGRAM_CARRIERS: &[&str] = &[
     "shabdiz-udp",
     "shabdiz-tcp",
     "shabdiz-gre",
+    "shabdiz-ipip",
+    "shabdiz-6to4",
+    "shabdiz-etherip",
+    "shabdiz-l2tp",
+    "shabdiz-mpls",
     "shabdiz-esp",
     "shabdiz-l2",
 ];
@@ -157,11 +162,31 @@ pub fn known(name: &str) -> bool {
 }
 
 pub fn needs_root(name: &str) -> bool {
-    RAW_CARRIERS.contains(&name) || matches!(name, "shabdiz-gre" | "shabdiz-esp" | "shabdiz-l2")
+    RAW_CARRIERS.contains(&name)
+        || matches!(
+            name,
+            "shabdiz-gre"
+                | "shabdiz-esp"
+                | "shabdiz-ipip"
+                | "shabdiz-6to4"
+                | "shabdiz-etherip"
+                | "shabdiz-l2tp"
+                | "shabdiz-mpls"
+                | "shabdiz-l2"
+        )
 }
 
 pub fn needs_public_address(name: &str) -> bool {
-    matches!(name, "shabdiz-gre" | "shabdiz-esp")
+    matches!(
+        name,
+        "shabdiz-gre"
+            | "shabdiz-esp"
+            | "shabdiz-ipip"
+            | "shabdiz-6to4"
+            | "shabdiz-etherip"
+            | "shabdiz-l2tp"
+            | "shabdiz-mpls"
+    )
 }
 
 pub fn private_source(peer: &str) -> Option<Ipv4Addr> {

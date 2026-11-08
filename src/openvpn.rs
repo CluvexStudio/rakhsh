@@ -19,6 +19,7 @@ const CONTROL_DEFAULT: usize = 1250;
 
 const GRE_CARRIED: usize = 1427;
 const ESP_CARRIED: usize = 1437;
+const TAGGED_CARRIED: usize = 1437;
 const L2_CARRIED: usize = 1405;
 const UDP_CARRIED: usize = 1437;
 const TCP_CARRIED: usize = 1365;
@@ -302,6 +303,9 @@ pub fn carried_payload(carrier: &str) -> Option<usize> {
     match carrier {
         "shabdiz-gre" => Some(GRE_CARRIED),
         "shabdiz-esp" => Some(ESP_CARRIED),
+        "shabdiz-ipip" | "shabdiz-6to4" | "shabdiz-etherip" | "shabdiz-l2tp" | "shabdiz-mpls" => {
+            Some(TAGGED_CARRIED)
+        }
         "shabdiz-l2" => Some(L2_CARRIED),
         "shabdiz-udp" => Some(UDP_CARRIED),
         "shabdiz-tcp" => Some(TCP_CARRIED),

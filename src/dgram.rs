@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use tokio::net::UdpSocket;
 use tracing::{info, warn};
 
-use shabdiz::carrier::{esp, gre, l2, tcp::Tcp, udp::Udp, Carrier};
+use shabdiz::carrier::{esp, gre, l2, tagged, tcp::Tcp, udp::Udp, Carrier};
 use shabdiz::handshake;
 use shabdiz::session::{self, Handle, Role};
 
@@ -22,9 +22,63 @@ const FLOW_IDLE: Duration = Duration::from_secs(120);
 enum Kind {
     Gre,
     Esp,
+    Tagged,
     L2,
     Udp,
     Tcp,
+}
+
+struct Tagged {
+    proto: libc::c_int,
+    name: &'static str,
+    context: &'static str,
+}
+
+const TAGGED: &[(&str, Tagged)] = &[
+    (
+        "shabdiz-ipip",
+        Tagged {
+            proto: 4,
+            name: "IPIP",
+            context: "shabdiz-ipip-tags-v1",
+        },
+    ),
+    (
+        "shabdiz-6to4",
+        Tagged {
+            proto: 41,
+            name: "6to4",
+            context: "shabdiz-6to4-tags-v1",
+        },
+    ),
+    (
+        "shabdiz-etherip",
+        Tagged {
+            proto: 97,
+            name: "EtherIP",
+            context: "shabdiz-etherip-tags-v1",
+        },
+    ),
+    (
+        "shabdiz-l2tp",
+        Tagged {
+            proto: 115,
+            name: "L2TPv3",
+            context: "shabdiz-l2tp-tags-v1",
+        },
+    ),
+    (
+        "shabdiz-mpls",
+        Tagged {
+            proto: 137,
+            name: "MPLS-in-IP",
+            context: "shabdiz-mpls-tags-v1",
+        },
+    ),
+];
+
+fn tagged_spec(carrier: &str) -> Option<&'static Tagged> {
+    TAGGED.iter().find(|(n, _)| *n == carrier).map(|(_, s)| s)
 }
 
 fn kind_of(carrier: &str) -> Option<Kind> {
@@ -34,6 +88,7 @@ fn kind_of(carrier: &str) -> Option<Kind> {
         "shabdiz-l2" => Some(Kind::L2),
         "shabdiz-udp" => Some(Kind::Udp),
         "shabdiz-tcp" => Some(Kind::Tcp),
+        _ if tagged_spec(carrier).is_some() => Some(Kind::Tagged),
         _ => None,
     }
 }
@@ -151,6 +206,36 @@ pub fn describe(cfg: &Config) -> Vec<String> {
             );
         }
     }
+    if kind == Kind::Tagged {
+        let spec = cfg
+            .carrier
+            .as_deref()
+            .and_then(tagged_spec)
+            .expect("a tagged kind always has a spec");
+        let (proto, name) = (spec.proto, spec.name);
+        out.push(format!(
+            "  IP protocol {proto}, shaped as {name} but carrying a token-derived tag and \
+             sequence number instead of an inner packet. The tag never begins with 4 or 6, so \
+             nothing downstream reads the payload as an IP header — the shape that was measured \
+             to be dropped on protocol 47."
+        ));
+        out.push(
+            "  UNMEASURED at volume on the Iranian path: a three-packet probe crossed, but that \
+             is exactly the trap sustained UDP fell into. Measure with `rakhsh doctor` before \
+             relying on it."
+                .to_string(),
+        );
+        out.push(
+            "  needs root (CAP_NET_RAW), and has no ports, so both ends need a public address — \
+             it cannot cross NAT. Either end may open the flow."
+                .to_string(),
+        );
+        if cfg.peer_ip.is_none() && cfg.tunnel_connect.is_none() {
+            out.push(
+                "  ERROR: set peer_ip (or tunnel_connect) so this end knows where to send".into(),
+            );
+        }
+    }
     if kind == Kind::L2 {
         let (a, b) = shabdiz_ports(&cfg.token);
         out.push(format!(
@@ -236,7 +321,7 @@ pub fn validate(cfg: &Config) -> Result<()> {
         return Ok(());
     };
     one_udp_forward(cfg)?;
-    if matches!(kind, Kind::Gre | Kind::Esp | Kind::L2) {
+    if matches!(kind, Kind::Gre | Kind::Esp | Kind::Tagged | Kind::L2) {
         peer_host(cfg, cfg.carrier.as_deref().unwrap_or("shabdiz"))?;
     }
     Ok(())
@@ -481,6 +566,29 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
             Ok(Arc::new(
                 esp::open(peer_ip, local, peer, mtu)
                     .context("opening the ESP carrier (needs root)")?,
+            ))
+        }
+        Kind::Tagged => {
+            let which = cfg.carrier.as_deref().unwrap_or("shabdiz-ipip");
+            let spec = tagged_spec(which).expect("a tagged kind always has a spec");
+            let peer_ip = peer_addr(cfg, which).await?;
+            let (entry_tag, exit_tag) = tagged::tags(cfg.token.as_bytes(), spec.context);
+            let (local, peer) = if cfg.role == "entry" {
+                (entry_tag, exit_tag)
+            } else {
+                (exit_tag, entry_tag)
+            };
+            let mtu = tagged::path_mtu(1500);
+            info!(
+                "{which}: {peer_ip} on IP protocol {} ({}), tag {local:#010x} <- {peer:#010x}, \
+                 mtu {mtu}, up to {} datagrams per syscall",
+                spec.proto,
+                spec.name,
+                shabdiz::carrier::BATCH
+            );
+            Ok(Arc::new(
+                tagged::open(spec.proto, spec.name, peer_ip, local, peer, mtu)
+                    .with_context(|| format!("opening the {which} carrier (needs root)"))?,
             ))
         }
         Kind::L2 => {
