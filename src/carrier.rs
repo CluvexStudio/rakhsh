@@ -613,7 +613,7 @@ impl Carrier {
                 reliability,
                 ..
             } => {
-                let peer = raw_peer_ip(addr)?;
+                let peer = raw_peer_ip(addr).await?;
                 let lane = counter.fetch_add(1, SeqCst);
                 let dial = crate::raw::Dial {
                     kind,
@@ -693,10 +693,9 @@ impl Carrier {
     }
 }
 
-fn raw_peer_ip(addr: &str) -> Result<Ipv4Addr> {
+async fn raw_peer_ip(addr: &str) -> Result<Ipv4Addr> {
     let host = addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(addr);
-    host.parse()
-        .with_context(|| format!("raw carrier needs an ipv4 peer, got {addr}"))
+    crate::dgram::peer_ipv4(host, "the raw carrier's peer").await
 }
 
 #[derive(Clone, Copy)]

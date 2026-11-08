@@ -237,7 +237,7 @@ pub fn validate(cfg: &Config) -> Result<()> {
     };
     one_udp_forward(cfg)?;
     if matches!(kind, Kind::Gre | Kind::Esp | Kind::L2) {
-        peer_addr(cfg, cfg.carrier.as_deref().unwrap_or("shabdiz"))?;
+        peer_host(cfg, cfg.carrier.as_deref().unwrap_or("shabdiz"))?;
     }
     Ok(())
 }
@@ -447,7 +447,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
             }
         }
         Kind::Gre => {
-            let peer_ip = peer_addr(cfg, "shabdiz-gre")?;
+            let peer_ip = peer_addr(cfg, "shabdiz-gre").await?;
             let (entry_mac, exit_mac) = gre::macs(cfg.token.as_bytes());
             let (local, peer) = if cfg.role == "entry" {
                 (entry_mac, exit_mac)
@@ -465,7 +465,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
             ))
         }
         Kind::Esp => {
-            let peer_ip = peer_addr(cfg, "shabdiz-esp")?;
+            let peer_ip = peer_addr(cfg, "shabdiz-esp").await?;
             let (entry_spi, exit_spi) = esp::spis(cfg.token.as_bytes());
             let (local, peer) = if cfg.role == "entry" {
                 (entry_spi, exit_spi)
@@ -484,7 +484,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
             ))
         }
         Kind::L2 => {
-            let peer_ip = peer_addr(cfg, "shabdiz-l2")?;
+            let peer_ip = peer_addr(cfg, "shabdiz-l2").await?;
             let (a, b) = shabdiz_ports(&cfg.token);
             let (sport, dport) = if dialer { (a, b) } else { (b, a) };
             let link = l2::discover(peer_ip).context("discovering the interface for shabdiz-l2")?;
@@ -500,16 +500,28 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
     }
 }
 
-fn peer_addr(cfg: &Config, what: &str) -> Result<Ipv4Addr> {
+pub(crate) fn peer_host<'a>(cfg: &'a Config, what: &str) -> Result<&'a str> {
+    let host = match (&cfg.peer_ip, &cfg.tunnel_connect) {
+        (Some(h), _) => h.trim(),
+        (None, Some(c)) => c.rsplit_once(':').map(|(h, _)| h).unwrap_or(c).trim(),
+        (None, None) => bail!("{what} needs peer_ip (or tunnel_connect) to reach the far end"),
+    };
+    if host.is_empty() {
+        bail!("{what}: peer_ip is empty");
+    }
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        bail!("{what}: {host} is IPv6; this carrier rides on IPv4");
+    }
+    Ok(host)
+}
+
+async fn peer_addr(cfg: &Config, what: &str) -> Result<Ipv4Addr> {
     match (&cfg.peer_ip, &cfg.tunnel_connect) {
-        (Some(ip), _) => ip.parse().context("peer_ip"),
-        (None, Some(c)) => c
-            .parse::<SocketAddr>()
-            .context("tunnel_connect")?
-            .ip()
-            .to_string()
-            .parse()
-            .context("tunnel_connect address"),
+        (Some(h), _) => peer_ipv4(h, "peer_ip").await,
+        (None, Some(c)) => {
+            let host = c.rsplit_once(':').map(|(h, _)| h).unwrap_or(c);
+            peer_ipv4(host, "tunnel_connect").await
+        }
         (None, None) => bail!("{what} needs peer_ip (or tunnel_connect) to reach the far end"),
     }
 }
@@ -728,3 +740,35 @@ async fn report(h: Arc<Handle>, carrier: Arc<dyn Carrier>) {
         );
     }
 }
+
+pub(crate) async fn peer_ipv4(host: &str, what: &str) -> anyhow::Result<std::net::Ipv4Addr> {
+    use anyhow::{bail, Context};
+    let host = host.trim();
+    if host.is_empty() {
+        bail!("{what} is empty");
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        return Ok(ip);
+    }
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        bail!("{what} {host} is IPv6; this carrier rides on IPv4");
+    }
+    let found = tokio::net::lookup_host((host, 0))
+        .await
+        .with_context(|| format!("resolving {what} {host}"))?
+        .find_map(|a| match a.ip() {
+            std::net::IpAddr::V4(v4) => Some(v4),
+            std::net::IpAddr::V6(_) => None,
+        });
+    match found {
+        Some(ip) => {
+            tracing::info!("{what} {host} resolved to {ip}");
+            Ok(ip)
+        }
+        None => bail!("{what} {host} has no A record; this carrier rides on IPv4"),
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/dgram_peer.rs"]
+mod peer_tests;

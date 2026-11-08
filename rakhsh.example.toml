@@ -241,6 +241,11 @@ decoy = true
 # The peer's address on the wire. Required on BOTH ends by the raw carriers,
 # because a forged packet has no connection for the kernel to learn it from.
 # A shabdiz-gre, shabdiz-esp or shabdiz-l2 config needs it too.
+#
+# A name works here as well as an address — `peer_ip = "exit.example.com"` is
+# resolved to its A record every time the carrier opens, so a peer whose address
+# changes is picked up on the next reconnect without editing the config. The
+# name must have an A record: these carriers ride on IPv4.
 
 # reliability = "quic"
 # quic (default) · kcp. What runs on top of the forged packets to recover from
