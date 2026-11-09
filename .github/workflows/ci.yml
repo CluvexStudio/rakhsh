@@ -99,6 +99,14 @@ jobs:
         working-directory: rakhsh
         run: cargo build -p rakhsh
 
+      - name: Upload the windows binary
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rakhsh-windows-x64
+          path: rakhsh/target/debug/rakhsh.exe
+          if-no-files-found: error
+
       # A TLS-handshake unit test holds a large rustls future on the test
       # thread's stack; Windows test threads start smaller than Linux's, so give
       # them room. The product itself handshakes on tokio worker threads.
