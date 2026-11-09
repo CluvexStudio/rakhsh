@@ -11,9 +11,11 @@ fn rakhsh(args: &[&str]) -> (bool, String) {
 }
 
 fn config(body: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!("rakhsh-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a working directory");
-    let path = dir.join(format!("{:x}.toml", body.len() as u64 * 2654435761));
+    let path = dir.join(format!("{}.toml", N.fetch_add(1, Ordering::Relaxed)));
     let head = "role = \"entry\"\n\
                 token = \"ERERERERERERERERERERERERERERERERERERERERERE=\"\n\
                 static_secret = \"IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=\"\n\

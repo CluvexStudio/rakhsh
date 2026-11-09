@@ -415,6 +415,7 @@ pub struct SpeedResult {
     pub up_mbit: Option<f64>,
 }
 
+#[cfg(unix)]
 pub async fn serve(path: String) {
     if tokio::net::UnixStream::connect(&path).await.is_ok() {
         warn!(
@@ -470,6 +471,14 @@ pub async fn serve(path: String) {
     }
 }
 
+#[cfg(not(unix))]
+pub async fn serve(_path: String) {
+    warn!(
+        "the control socket is Unix-only; status and the panel are not available on this platform"
+    );
+}
+
+#[cfg(unix)]
 pub async fn query_speedtest(path: &str) -> anyhow::Result<SpeedResult> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut conn = tokio::net::UnixStream::connect(path)
@@ -488,6 +497,12 @@ pub async fn query_speedtest(path: &str) -> anyhow::Result<SpeedResult> {
     })
 }
 
+#[cfg(not(unix))]
+pub async fn query_speedtest(_path: &str) -> anyhow::Result<SpeedResult> {
+    anyhow::bail!("the control socket is Unix-only on this platform")
+}
+
+#[cfg(unix)]
 pub async fn query(path: &str) -> anyhow::Result<Snapshot> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut conn = tokio::net::UnixStream::connect(path)
@@ -498,6 +513,11 @@ pub async fn query(path: &str) -> anyhow::Result<Snapshot> {
     let mut buf = Vec::new();
     conn.read_to_end(&mut buf).await?;
     Ok(serde_json::from_slice(&buf)?)
+}
+
+#[cfg(not(unix))]
+pub async fn query(_path: &str) -> anyhow::Result<Snapshot> {
+    anyhow::bail!("the control socket is Unix-only on this platform")
 }
 
 fn hostname() -> String {

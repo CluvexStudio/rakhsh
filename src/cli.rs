@@ -916,6 +916,7 @@ pub(crate) fn proxy_block(listen: Option<&str>, split_iran: bool, with_tunnel: b
 
 fn tidy() {
     raw::cleanup();
+    #[cfg(target_os = "linux")]
     shabdiz::carrier::l2::cleanup();
 }
 
@@ -929,11 +930,19 @@ impl Drop for Tidy {
 
 fn tidy_on_signal() {
     tokio::spawn(async {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("sigterm");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
+        #[cfg(unix)]
+        {
+            let mut term =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("sigterm");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
         }
         tidy();
         std::process::exit(0);
