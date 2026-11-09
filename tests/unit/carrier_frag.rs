@@ -112,8 +112,23 @@ async fn budget_is_shared_across_separate_writes() {
     );
 }
 
-#[tokio::test]
-async fn a_fragmented_client_hello_still_completes_the_handshake() {
+#[test]
+fn a_fragmented_client_hello_still_completes_the_handshake() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(fragmented_handshake())
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+async fn fragmented_handshake() {
     let port = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .unwrap()

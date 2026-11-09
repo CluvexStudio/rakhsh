@@ -76,11 +76,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-    # A TLS-handshake test drives a large rustls future on the main thread,
-    # whose stack Windows reserves smaller than Linux does; give the linked
-    # binary a bigger main stack there (harmless for the shipped rakhsh.exe).
-    env:
-      RUSTFLAGS: ${{ matrix.os == 'windows-latest' && '-C link-arg=/STACK:16777216' || '' }}
     steps:
       - uses: actions/checkout@v5
         with:
