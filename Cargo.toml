@@ -11,6 +11,7 @@ repository = "https://github.com/CluvexStudio/rakhsh"
 default = ["mimalloc", "acme"]
 mimalloc = ["dep:mimalloc"]
 acme = ["dep:instant-acme", "dep:x509-parser"]
+windivert = ["dep:windivert", "dep:windows"]
 
 [[bin]]
 name = "rakhsh"
@@ -57,10 +58,13 @@ rama = { git = "https://github.com/plabayo/rama", rev = "ec92b76", default-featu
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # Raw-packet carriers on Windows need a driver: the kernel blocks crafted TCP
-# from user space. WinDivert is that driver; "static" vendors its SDK so the
-# build is self-contained. GetBestInterface comes from the windows crate.
-windivert = { version = "=0.6.0", features = ["static"] }
-windows = { version = "0.48", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper"] }
+# from user space. WinDivert is that driver, and "static" vendors its SDK. Its
+# C also defines a global memcpy, which an MSVC-linked binary resolves into a
+# memcpy that calls itself until the stack is gone -- any rakhsh command dies on
+# startup. So the carrier is opt-in: `cargo build --features windivert`, which
+# also needs WinDivert64.sys beside the binary and a Defender exclusion.
+windivert = { version = "=0.6.0", features = ["static"], optional = true }
+windows = { version = "0.48", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper"], optional = true }
 
 
 [profile.release]

@@ -27,7 +27,7 @@ mod route;
 mod session;
 mod stats;
 mod status;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "windivert"))]
 mod windivert_tcp;
 mod wire;
 mod xui;

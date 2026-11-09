@@ -7,6 +7,11 @@ use crate::carrier::{BoxRx, BoxTx};
 
 pub const RAW_LANES: u64 = 1;
 
+#[cfg(all(target_os = "windows", not(feature = "windivert")))]
+const NO_WINDIVERT: &str =
+    "faketcp on Windows needs the WinDivert driver, which this binary was built without; \
+     rebuild with `--features windivert` or use a stream carrier such as quic, wss or tls";
+
 const UNSUPPORTED: &str =
     "raw-packet carriers (faketcp, l2tcp, icmp, spoof) need Linux; on this platform use a \
      stream carrier such as quic, wss or tls";
@@ -62,9 +67,13 @@ pub async fn connect(
     peer: Option<Ipv4Addr>,
     lane: u64,
 ) -> Result<(BoxTx, BoxRx)> {
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "windivert"))]
     if d.kind == "faketcp" {
         return crate::windivert_tcp::connect_faketcp(d.params, peer, initiator, lane);
+    }
+    #[cfg(all(target_os = "windows", not(feature = "windivert")))]
+    if d.kind == "faketcp" {
+        bail!(NO_WINDIVERT)
     }
     let _ = (&d, initiator, peer, lane);
     bail!(UNSUPPORTED)
