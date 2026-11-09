@@ -41,16 +41,25 @@ async fn try_fetch(n: &Node) -> anyhow::Result<Value> {
             run_checked(n, &cmd, Duration::from_secs(10)).await?
         }
         None => {
-            let mut c = tokio::time::timeout(
-                Duration::from_secs(5),
-                tokio::net::UnixStream::connect(&n.socket),
+            #[cfg(unix)]
+            {
+                let mut c = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    tokio::net::UnixStream::connect(&n.socket),
+                )
+                .await??;
+                c.write_all(b"status\n").await?;
+                c.shutdown().await.ok();
+                let mut buf = Vec::new();
+                c.read_to_end(&mut buf).await?;
+                buf
+            }
+            #[cfg(not(unix))]
+            anyhow::bail!(
+                "node control socket {} is a Unix socket; a Windows control center must reach \
+                 this node over ssh instead",
+                n.socket
             )
-            .await??;
-            c.write_all(b"status\n").await?;
-            c.shutdown().await.ok();
-            let mut buf = Vec::new();
-            c.read_to_end(&mut buf).await?;
-            buf
         }
     };
     Ok(serde_json::from_slice(&raw)?)

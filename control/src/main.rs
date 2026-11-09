@@ -509,10 +509,14 @@ fn ct_eq(a: &str, b: &str) -> bool {
     a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
+#[cfg(unix)]
 fn harden(path: &str) {
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
 }
+
+#[cfg(not(unix))]
+fn harden(_path: &str) {}
 
 fn init(config: &str, username: Option<&str>, password: Option<&str>, listen: &str) -> Result<()> {
     if std::path::Path::new(config).exists() {
