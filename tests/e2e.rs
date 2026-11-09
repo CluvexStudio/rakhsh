@@ -60,26 +60,50 @@ fn wait_for(port: u16, limit: Duration) -> bool {
     false
 }
 
-fn socks_connect(socks: u16, target: u16) -> TcpStream {
-    let mut s = TcpStream::connect(("127.0.0.1", socks)).expect("the proxy accepts");
-    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    s.set_write_timeout(Some(Duration::from_secs(10))).unwrap();
+fn socks_connect(socks: u16, target: u16, limit: Duration) -> TcpStream {
+    let deadline = Instant::now() + limit;
+    loop {
+        match try_socks(socks, target) {
+            Ok(s) => return s,
+            Err(e) => {
+                if Instant::now() >= deadline {
+                    panic!("the proxy never carried a connection to {target}: {e}");
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+}
 
-    s.write_all(&[0x05, 0x01, 0x00]).unwrap();
+fn try_socks(socks: u16, target: u16) -> std::io::Result<TcpStream> {
+    let mut s = TcpStream::connect(("127.0.0.1", socks))?;
+    s.set_read_timeout(Some(Duration::from_secs(10)))?;
+    s.set_write_timeout(Some(Duration::from_secs(10)))?;
+
+    s.write_all(&[0x05, 0x01, 0x00])?;
     let mut greeting = [0u8; 2];
-    s.read_exact(&mut greeting).expect("a greeting back");
-    assert_eq!(greeting, [0x05, 0x00], "SOCKS5, no authentication");
+    s.read_exact(&mut greeting)?;
+    if greeting != [0x05, 0x00] {
+        return Err(std::io::Error::other(format!(
+            "the proxy did not offer SOCKS5 without authentication: {greeting:?}"
+        )));
+    }
 
     let mut request = vec![0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1];
     request.extend_from_slice(&target.to_be_bytes());
-    s.write_all(&request).unwrap();
+    s.write_all(&request)?;
 
     let mut reply = [0u8; 10];
-    s.read_exact(&mut reply).expect("a reply to the connect");
-    assert_eq!(reply[1], 0x00, "the proxy opened the connection: {reply:?}");
-    s
+    s.read_exact(&mut reply)?;
+    if reply[1] != 0x00 {
+        return Err(std::io::Error::other(format!(
+            "the proxy refused to open the connection: {reply:?}"
+        )));
+    }
+    Ok(s)
 }
 
+#[cfg(unix)]
 fn lanes_up(bin: &str, socket: &str, limit: Duration) -> bool {
     let deadline = Instant::now() + limit;
     while Instant::now() < deadline {
@@ -147,7 +171,10 @@ fn a_tunnel_carries_traffic_end_to_end() {
 
     let entry = dir.join("entry.toml");
     let exit = dir.join("exit.toml");
-    let sock = |name: &str| format!("control_socket = \"{}\"\n", dir.join(name).display());
+    let sock = |name: &str| match cfg!(unix) {
+        true => format!("control_socket = '{}'\n", dir.join(name).display()),
+        false => String::new(),
+    };
     std::fs::write(&entry, sock("entry.sock") + parts[2].trim_start()).unwrap();
     std::fs::write(&exit, sock("exit.sock") + parts[4].trim_start()).unwrap();
 
@@ -182,15 +209,18 @@ fn a_tunnel_carries_traffic_end_to_end() {
         near.complaint()
     );
 
-    let status = dir.join("entry.sock").display().to_string();
-    assert!(
-        lanes_up(bin, &status, Duration::from_secs(20)),
-        "the proxy port opens before the lanes do, so wait for a lane before using it; \
-         the near side said:\n{}",
-        near.complaint()
-    );
+    #[cfg(unix)]
+    {
+        let status = dir.join("entry.sock").display().to_string();
+        assert!(
+            lanes_up(bin, &status, Duration::from_secs(20)),
+            "the proxy port opens before the lanes do, so wait for a lane before using it; \
+             the near side said:\n{}",
+            near.complaint()
+        );
+    }
 
-    let mut through = socks_connect(socks, echo);
+    let mut through = socks_connect(socks, echo, Duration::from_secs(30));
     let sent = b"the quick brown fox crosses the tunnel";
     through.write_all(sent).unwrap();
     let mut got = vec![0u8; sent.len()];
