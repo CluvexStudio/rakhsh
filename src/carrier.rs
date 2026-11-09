@@ -483,7 +483,7 @@ impl Carrier {
                         .filter(|x| !x.is_empty())
                         .collect(),
                 },
-                spoof_peer: parse_ip(&cfg.spoof_peer_ip),
+                spoof_peer: parse_ip(&cfg.spoof_peer_ip).or_else(|| parse_ip(&cfg.peer_ip)),
                 fec: match (cfg.fec_data, cfg.fec_parity) {
                     (Some(d), Some(p)) if d > 0 && p > 0 => Some((d, p)),
                     _ => None,
