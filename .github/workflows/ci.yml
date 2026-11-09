@@ -107,14 +107,9 @@ jobs:
           path: rakhsh/target/debug/rakhsh.exe
           if-no-files-found: error
 
-      # A TLS-handshake unit test holds a large rustls future on the test
-      # thread's stack; Windows test threads start smaller than Linux's, so give
-      # them room. The product itself handshakes on tokio worker threads.
       - name: Tests
         working-directory: rakhsh
         run: cargo test --workspace
-        env:
-          RUST_MIN_STACK: "16777216"
 
   panel:
     runs-on: ubuntu-latest
