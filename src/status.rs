@@ -753,6 +753,6 @@ pub fn print_table(s: &Snapshot) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "../tests/unit/status.rs"]
 mod tests;
