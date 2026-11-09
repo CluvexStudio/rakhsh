@@ -537,9 +537,28 @@ pub async fn run() -> Result<()> {
         }
         Cmd::InitNode { listen } => init_node(&listen),
         Cmd::Rules { which, output } => build_rules(&which, &output)?,
+        #[cfg(target_os = "linux")]
         Cmd::Install { config, name } => install_service(&config, &name)?,
+        #[cfg(not(target_os = "linux"))]
+        Cmd::Install { .. } => bail!(
+            "`rakhsh install` writes a systemd unit, which only Linux has; here, run \
+             `rakhsh run -c <config>` and hand that command to this platform's own service \
+             manager (Task Scheduler or sc.exe on Windows, launchd on macOS)"
+        ),
+        #[cfg(target_os = "linux")]
         Cmd::Uninstall { name } => uninstall_service(&name)?,
+        #[cfg(not(target_os = "linux"))]
+        Cmd::Uninstall { .. } => bail!(
+            "`rakhsh uninstall` removes a systemd unit, which only Linux has; remove whatever \
+             this platform's service manager was told to run"
+        ),
+        #[cfg(target_os = "linux")]
         Cmd::Optimize { persist } => optimize(persist)?,
+        #[cfg(not(target_os = "linux"))]
+        Cmd::Optimize { .. } => bail!(
+            "`rakhsh optimize` raises Linux socket and congestion sysctls, which this platform \
+             does not have"
+        ),
         Cmd::Run { config } => {
             tidy_on_signal();
             let cfg = config::Config::load(&config)?;
@@ -1035,6 +1054,7 @@ fn build_rules(which: &str, output: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn install_service(config: &std::path::Path, name: &str) -> Result<()> {
     use std::process::Command;
     let exe = std::env::current_exe().context("finding current executable")?;
@@ -1074,6 +1094,7 @@ WantedBy=multi-user.target\n",
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn uninstall_service(name: &str) -> Result<()> {
     use std::process::Command;
     let svc = format!("{name}.service");
@@ -1088,6 +1109,7 @@ fn uninstall_service(name: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn optimize(persist: bool) -> Result<()> {
     use std::process::Command;
     let settings: &[(&str, &str)] = &[
