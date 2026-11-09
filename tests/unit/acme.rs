@@ -201,7 +201,8 @@ fn a_stored_certificate_reports_the_time_it_has_left() {
 
 #[test]
 fn inspecting_a_config_never_reaches_for_a_certificate() {
-    let src = std::fs::read_to_string("src/carrier.rs").expect("the carrier source is readable");
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/carrier.rs"))
+        .expect("the carrier source is readable");
     let at = src
         .find("fn server_tls")
         .expect("the tls acceptor chooser must exist");
@@ -242,7 +243,8 @@ fn a_failing_name_is_retried_slowly_enough_not_to_be_rate_limited() {
 
 #[test]
 fn only_the_side_that_listens_asks_for_a_certificate() {
-    let src = std::fs::read_to_string("src/carrier.rs").expect("the carrier source is readable");
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/carrier.rs"))
+        .expect("the carrier source is readable");
     let at = src.find("fn server_tls").expect("the chooser must exist");
     let body = &src[at..at + 900];
     let guard = body
