@@ -175,8 +175,93 @@ jobs:
           path: rakhsh/dist/*
           if-no-files-found: error
 
+  # faketcp on Windows goes through the WinDivert driver. Windows only loads a
+  # signed driver, so the package carries the official WinDivert files next to
+  # a rakhsh.exe built with --features windivert.
+  windivert:
+    name: windows ${{ matrix.arch }} windivert
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, target: x86_64-pc-windows-msvc, dir: x64 }
+          - { arch: i686, target: i686-pc-windows-msvc, dir: x86 }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: rakhsh
+
+      - uses: actions/checkout@v5
+        with:
+          repository: CluvexStudio/shabdiz
+          path: shabdiz
+          ssh-key: ${{ secrets.SHABDIZ_SSH_KEY }}
+          token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rakhsh
+          key: windivert-${{ matrix.target }}
+
+      - name: Fetch WinDivert
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'windivert.zip'
+          $out = Join-Path $env:RUNNER_TEMP 'windivert'
+          Invoke-WebRequest -Uri "https://github.com/basil00/WinDivert/releases/download/v$env:WINDIVERT_VERSION/WinDivert-$env:WINDIVERT_VERSION-A.zip" -OutFile $zip
+          "zip sha256 " + (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          Expand-Archive $zip -DestinationPath $out
+          $dll = Get-ChildItem $out -Recurse -Filter WinDivert.dll | Where-Object { $_.Directory.Name -eq '${{ matrix.dir }}' } | Select-Object -First 1
+          if (-not $dll) { throw 'no WinDivert.dll for ${{ matrix.dir }} in the release' }
+          foreach ($f in Get-ChildItem $dll.Directory.FullName | Where-Object { $_.Extension -in '.dll', '.sys' }) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            "$($f.Name): $($sig.Status), $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -in 'NotSigned', 'HashMismatch') { throw "$($f.Name) failed its signature check" }
+          }
+          "WINDIVERT_PATH=$($dll.Directory.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "WINDIVERT_ROOT=$($dll.Directory.Parent.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+        env:
+          WINDIVERT_VERSION: 2.2.2
+
+      - name: Build
+        working-directory: rakhsh
+        run: cargo build --release --target ${{ matrix.target }} -p rakhsh --features windivert
+
+      - name: Package
+        working-directory: rakhsh
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = 'rakhsh-windivert-${{ matrix.target }}'
+          $pkg = Join-Path $env:RUNNER_TEMP $name
+          New-Item -ItemType Directory -Force $pkg, dist | Out-Null
+          Copy-Item 'target\${{ matrix.target }}\release\rakhsh.exe' $pkg
+          Copy-Item (Join-Path $env:WINDIVERT_PATH 'WinDivert.dll'), (Join-Path $env:WINDIVERT_PATH 'WinDivert*.sys') $pkg
+          $license = Get-ChildItem $env:WINDIVERT_ROOT -Filter 'LICENSE*' | Select-Object -First 1
+          if (-not $license) { throw 'no LICENSE in the WinDivert release' }
+          Copy-Item $license.FullName (Join-Path $pkg 'WinDivert-LICENSE.txt')
+          & (Join-Path $pkg 'rakhsh.exe') --help > $null
+          if ($LASTEXITCODE -ne 0) { throw "rakhsh.exe --help exited with $LASTEXITCODE" }
+          Get-ChildItem $pkg
+          Compress-Archive -Path $pkg -DestinationPath "dist\$name.zip"
+          $sum = (Get-FileHash "dist\$name.zip" -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText((Join-Path (Resolve-Path dist) "$name.zip.sha256"), "$sum  $name.zip`n")
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windivert-${{ matrix.target }}
+          path: rakhsh/dist/*
+          if-no-files-found: error
+
   publish:
-    needs: [linux, desktop]
+    needs: [linux, desktop, windivert]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

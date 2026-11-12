@@ -70,7 +70,10 @@ the rest.
 Every release carries a static musl binary for x86-64, aarch64, armv7, armv6, i686, riscv64,
 loongarch64 and ppc64le, each next to a checksum the installer verifies before it installs
 anything. The same release has Windows builds for x64, x86 and ARM64, and macOS builds for Intel
-and Apple Silicon. Everything works there except the raw-packet carriers, which need Linux.
+and Apple Silicon. Everything works there except the raw-packet carriers, which need Linux, with one
+exception: faketcp on Windows. For that, take the `rakhsh-windivert` zip, a build with faketcp next
+to the WinDivert driver it uses. Keep the files together and run it as Administrator. Windows
+Defender may flag WinDivert because it can capture packets; allow it if you want faketcp.
 
 To build it yourself, clone shabdiz next to it:
 
