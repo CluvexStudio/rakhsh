@@ -186,7 +186,6 @@ jobs:
       matrix:
         include:
           - { arch: x86_64, target: x86_64-pc-windows-msvc, dir: x64 }
-          - { arch: i686, target: i686-pc-windows-msvc, dir: x86 }
     steps:
       - uses: actions/checkout@v5
         with:
