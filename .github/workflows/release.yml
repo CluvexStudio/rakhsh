@@ -215,11 +215,12 @@ jobs:
           $zip = Join-Path $env:RUNNER_TEMP 'windivert.zip'
           $out = Join-Path $env:RUNNER_TEMP 'windivert'
           Invoke-WebRequest -Uri "https://github.com/basil00/WinDivert/releases/download/v$env:WINDIVERT_VERSION/WinDivert-$env:WINDIVERT_VERSION-A.zip" -OutFile $zip
-          "zip sha256 " + (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          $sum = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($sum -ne $env:WINDIVERT_SHA256) { throw "WinDivert zip is $sum, expected $env:WINDIVERT_SHA256" }
           Expand-Archive $zip -DestinationPath $out
           $dll = Get-ChildItem $out -Recurse -Filter WinDivert.dll | Where-Object { $_.Directory.Name -eq '${{ matrix.dir }}' } | Select-Object -First 1
           if (-not $dll) { throw 'no WinDivert.dll for ${{ matrix.dir }} in the release' }
-          foreach ($f in Get-ChildItem $dll.Directory.FullName | Where-Object { $_.Extension -in '.dll', '.sys' }) {
+          foreach ($f in Get-ChildItem $dll.Directory.FullName -Filter *.sys) {
             $sig = Get-AuthenticodeSignature $f.FullName
             "$($f.Name): $($sig.Status), $($sig.SignerCertificate.Subject)"
             if ($sig.Status -in 'NotSigned', 'HashMismatch') { throw "$($f.Name) failed its signature check" }
@@ -228,6 +229,7 @@ jobs:
           "WINDIVERT_ROOT=$($dll.Directory.Parent.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
         env:
           WINDIVERT_VERSION: 2.2.2
+          WINDIVERT_SHA256: 63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15
 
       - name: Build
         working-directory: rakhsh
