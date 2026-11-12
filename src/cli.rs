@@ -310,15 +310,26 @@ pub async fn run() -> Result<()> {
                         ""
                     }
                 );
-                if cfg.lanes.is_some_and(|l| l != raw::RAW_LANES as usize) {
+                if cfg.carrier.as_deref() == Some("faketcp") {
                     println!(
-                        "  note: lanes = {} is ignored — a raw carrier always runs {} lane. Each \
-                         lane would be its own crafted-TCP port pair over the same bottleneck, so \
-                         extra lanes cost CPU without adding throughput; FEC is the lever instead. \
-                         Set lanes = {} so the config says what it does.",
+                        "  faketcp header: {}",
+                        cfg.faketcp_header.as_deref().unwrap_or("bare (default)")
+                    );
+                }
+                let raw_lanes = cfg.raw_lanes.unwrap_or(raw::RAW_LANES);
+                if cfg.reliability.as_deref().unwrap_or("quic") == "quic" {
+                    println!(
+                        "  inner quic: {raw_lanes} lane(s), {} MiB window, {} — raw_lanes must \
+                         match the other end",
+                        cfg.raw_window_mb.unwrap_or(1),
+                        cfg.raw_congestion.as_deref().unwrap_or("cubic")
+                    );
+                }
+                if cfg.lanes.is_some_and(|l| l != raw_lanes as usize) {
+                    println!(
+                        "  note: lanes = {} is ignored — a raw carrier runs raw_lanes lanes \
+                         ({raw_lanes}); set raw_lanes to change that",
                         cfg.lanes.unwrap_or(0),
-                        raw::RAW_LANES,
-                        raw::RAW_LANES
                     );
                 }
                 if let Some(n) = cfg.spoof_sockbuf {
@@ -497,7 +508,7 @@ pub async fn run() -> Result<()> {
                         .and_then(|c| config::Config::load(c).ok())
                         .and_then(|c| c.control_socket)
                 })
-                .unwrap_or_else(|| status::DEFAULT_SOCKET.to_string());
+                .unwrap_or_else(status::default_socket);
             let snap = status::query(&path).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&snap)?);
@@ -517,7 +528,7 @@ pub async fn run() -> Result<()> {
                         .and_then(|c| config::Config::load(c).ok())
                         .and_then(|c| c.control_socket)
                 })
-                .unwrap_or_else(|| status::DEFAULT_SOCKET.to_string());
+                .unwrap_or_else(status::default_socket);
             let r = status::query_speedtest(&path).await?;
             if json {
                 println!(
@@ -537,28 +548,9 @@ pub async fn run() -> Result<()> {
         }
         Cmd::InitNode { listen } => init_node(&listen),
         Cmd::Rules { which, output } => build_rules(&which, &output)?,
-        #[cfg(target_os = "linux")]
         Cmd::Install { config, name } => install_service(&config, &name)?,
-        #[cfg(not(target_os = "linux"))]
-        Cmd::Install { .. } => bail!(
-            "`rakhsh install` writes a systemd unit, which only Linux has; here, run \
-             `rakhsh run -c <config>` and hand that command to this platform's own service \
-             manager (Task Scheduler or sc.exe on Windows, launchd on macOS)"
-        ),
-        #[cfg(target_os = "linux")]
         Cmd::Uninstall { name } => uninstall_service(&name)?,
-        #[cfg(not(target_os = "linux"))]
-        Cmd::Uninstall { .. } => bail!(
-            "`rakhsh uninstall` removes a systemd unit, which only Linux has; remove whatever \
-             this platform's service manager was told to run"
-        ),
-        #[cfg(target_os = "linux")]
         Cmd::Optimize { persist } => optimize(persist)?,
-        #[cfg(not(target_os = "linux"))]
-        Cmd::Optimize { .. } => bail!(
-            "`rakhsh optimize` raises Linux socket and congestion sysctls, which this platform \
-             does not have"
-        ),
         Cmd::Run { config } => {
             tidy_on_signal();
             let cfg = config::Config::load(&config)?;
@@ -689,7 +681,15 @@ fn init(args: &InitArgs) -> Result<()> {
     let b64 = |b: &[u8]| BASE64_STANDARD.encode(b);
 
     let port = tunnel_addr.rsplit(':').next().unwrap_or("7000");
-    let bind = format!("0.0.0.0:{port}");
+    let v6_peer = tunnel_addr.trim_start().starts_with('[')
+        || tunnel_addr
+            .rsplit_once(':')
+            .map(|(h, _)| h)
+            .unwrap_or(tunnel_addr)
+            .parse::<std::net::Ipv6Addr>()
+            .is_ok();
+    let any = if v6_peer { "[::]" } else { "0.0.0.0" };
+    let bind = format!("{any}:{port}");
     let tls = matches!(carrier, "tls" | "ws" | "wss");
     let urlsafe = |n: usize| {
         let mut b = vec![0u8; n];
@@ -809,7 +809,7 @@ fn init(args: &InitArgs) -> Result<()> {
         }
         let table =
             |addr: String| format!("\n[[link]]\ncarrier = \"{kind}\"\naddr = \"{addr}\"\n{extra}");
-        let (listen_addr, dial_addr) = (format!("0.0.0.0:{port}"), format!("{host}:{port}"));
+        let (listen_addr, dial_addr) = (format!("{any}:{port}"), format!("{host}:{port}"));
         if direct {
             entry_links.push_str(&table(dial_addr));
             exit_links.push_str(&table(listen_addr));
@@ -822,7 +822,14 @@ fn init(args: &InitArgs) -> Result<()> {
     let datagram = carrier.starts_with("shabdiz-");
     let raw_peer = matches!(
         carrier,
-        "faketcp" | "l2tcp" | "icmp" | "spoof" | "shabdiz-gre" | "shabdiz-esp" | "shabdiz-l2"
+        "faketcp"
+            | "l2tcp"
+            | "icmp"
+            | "spoof"
+            | "shabdiz-gre"
+            | "shabdiz-gre6"
+            | "shabdiz-esp"
+            | "shabdiz-l2"
     );
     let (dials_peer_ip, listens_peer_ip) = if raw_peer {
         let listens = match far_ip {
@@ -1052,6 +1059,211 @@ fn build_rules(which: &str, output: &std::path::Path) -> Result<()> {
         v6
     );
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_service(config: &std::path::Path, name: &str) -> Result<()> {
+    use std::process::Command;
+    let exe = std::env::current_exe().context("finding current executable")?;
+    let cfg_abs = std::fs::canonicalize(config)
+        .with_context(|| format!("resolving config path {}", config.display()))?;
+    let plist_path = format!("/Library/LaunchDaemons/{name}.plist");
+    let plist = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
+\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+<plist version=\"1.0\">\n\
+<dict>\n\
+  <key>Label</key><string>{name}</string>\n\
+  <key>ProgramArguments</key>\n\
+  <array>\n\
+    <string>{exe}</string>\n\
+    <string>run</string>\n\
+    <string>-c</string>\n\
+    <string>{cfg}</string>\n\
+  </array>\n\
+  <key>RunAtLoad</key><true/>\n\
+  <key>KeepAlive</key><true/>\n\
+  <key>StandardOutPath</key><string>/var/log/{name}.log</string>\n\
+  <key>StandardErrorPath</key><string>/var/log/{name}.log</string>\n\
+  <key>SoftResourceLimits</key><dict><key>NumberOfFiles</key><integer>65536</integer></dict>\n\
+</dict>\n\
+</plist>\n",
+        exe = exe.display(),
+        cfg = cfg_abs.display(),
+    );
+    std::fs::write(&plist_path, plist)
+        .with_context(|| format!("writing {plist_path} (need root)"))?;
+    let bootstrapped = Command::new("launchctl")
+        .args(["bootstrap", "system", &plist_path])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let loaded = bootstrapped
+        || Command::new("launchctl")
+            .args(["load", "-w", &plist_path])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+    if !loaded {
+        anyhow::bail!("launchctl refused to start {name} ({plist_path} was written)");
+    }
+    println!("installed and started {name} ({plist_path})");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn uninstall_service(name: &str) -> Result<()> {
+    use std::process::Command;
+    let plist_path = format!("/Library/LaunchDaemons/{name}.plist");
+    Command::new("launchctl")
+        .args(["bootout", &format!("system/{name}")])
+        .status()
+        .ok();
+    Command::new("launchctl")
+        .args(["unload", "-w", &plist_path])
+        .status()
+        .ok();
+    let _ = std::fs::remove_file(&plist_path);
+    println!("removed {name}");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn optimize(persist: bool) -> Result<()> {
+    use std::process::Command;
+    let settings: &[(&str, &str)] = &[
+        ("kern.ipc.maxsockbuf", "8388608"),
+        ("net.inet.tcp.sendspace", "1048576"),
+        ("net.inet.tcp.recvspace", "1048576"),
+    ];
+    let mut applied = 0;
+    for (k, v) in settings {
+        if Command::new("sysctl")
+            .arg("-w")
+            .arg(format!("{k}={v}"))
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            applied += 1;
+        }
+    }
+    if persist {
+        let body: String = settings.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+        let old = std::fs::read_to_string("/etc/sysctl.conf").unwrap_or_default();
+        let _ = std::fs::write("/etc/sysctl.conf", old + &body);
+    }
+    println!(
+        "applied {applied}/{} socket-buffer tunables{}",
+        settings.len(),
+        if persist {
+            "; appended to /etc/sysctl.conf"
+        } else {
+            ""
+        }
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn install_service(config: &std::path::Path, name: &str) -> Result<()> {
+    use std::process::Command;
+    let exe = std::env::current_exe().context("finding current executable")?;
+    let cfg_abs = std::fs::canonicalize(config)
+        .with_context(|| format!("resolving config path {}", config.display()))?;
+    let strip = |p: String| p.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(p);
+    let exe = strip(exe.display().to_string());
+    let cfg = strip(cfg_abs.display().to_string());
+    let action = format!("\"{exe}\" run -c \"{cfg}\"");
+    let st = Command::new("schtasks")
+        .args([
+            "/create", "/tn", name, "/tr", &action, "/sc", "onstart", "/ru", "SYSTEM", "/rl",
+            "HIGHEST", "/f",
+        ])
+        .status()
+        .context("running schtasks /create (needs an elevated prompt)")?;
+    if !st.success() {
+        anyhow::bail!(
+            "schtasks could not create the {name} task; run this from an Administrator prompt"
+        );
+    }
+    Command::new("schtasks")
+        .args(["/run", "/tn", name])
+        .status()
+        .ok();
+    println!("installed and started the {name} scheduled task, which runs at boot as SYSTEM");
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn uninstall_service(name: &str) -> Result<()> {
+    use std::process::Command;
+    Command::new("schtasks")
+        .args(["/end", "/tn", name])
+        .status()
+        .ok();
+    let st = Command::new("schtasks")
+        .args(["/delete", "/tn", name, "/f"])
+        .status()
+        .context("running schtasks /delete")?;
+    if !st.success() {
+        anyhow::bail!(
+            "schtasks could not delete the {name} task; run this from an Administrator prompt"
+        );
+    }
+    println!("removed the {name} scheduled task");
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn optimize(persist: bool) -> Result<()> {
+    use std::process::Command;
+    let settings: &[&[&str]] = &[
+        &["int", "tcp", "set", "global", "autotuninglevel=normal"],
+        &["int", "tcp", "set", "global", "rss=enabled"],
+        &[
+            "int",
+            "tcp",
+            "set",
+            "supplemental",
+            "template=internet",
+            "congestionprovider=cubic",
+        ],
+    ];
+    let mut applied = 0;
+    for args in settings {
+        if Command::new("netsh")
+            .args(*args)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            applied += 1;
+        }
+    }
+    let _ = persist;
+    println!(
+        "applied {applied}/{} TCP settings (receive-window autotuning, rss, cubic); \
+         netsh settings already survive a reboot",
+        settings.len()
+    );
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn install_service(_config: &std::path::Path, _name: &str) -> Result<()> {
+    bail!("rakhsh has no service installer for this platform; run `rakhsh run -c <config>` under whatever supervisor it uses")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn uninstall_service(_name: &str) -> Result<()> {
+    bail!("rakhsh has no service installer for this platform, so there is nothing to remove")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn optimize(_persist: bool) -> Result<()> {
+    bail!("rakhsh knows no network tunables for this platform")
 }
 
 #[cfg(target_os = "linux")]

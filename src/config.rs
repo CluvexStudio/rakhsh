@@ -30,6 +30,10 @@ pub struct Config {
     pub fec_data: Option<usize>,
     pub fec_parity: Option<usize>,
     pub reliability: Option<String>,
+    pub faketcp_header: Option<String>,
+    pub raw_window_mb: Option<u32>,
+    pub raw_congestion: Option<String>,
+    pub raw_lanes: Option<u64>,
     pub spoof_src_ip: Option<String>,
     pub spoof_peer_ip: Option<String>,
     pub spoof_src_pool: Option<String>,
@@ -260,6 +264,7 @@ pub struct Link {
     pub quic_mask: Option<bool>,
     pub quic_version: Option<u32>,
     pub reliability: Option<String>,
+    pub faketcp_header: Option<String>,
 }
 
 impl Config {
@@ -316,7 +321,8 @@ impl Config {
             acme_staging,
             quic_mask,
             quic_version,
-            reliability
+            reliability,
+            faketcp_header
         );
         c
     }

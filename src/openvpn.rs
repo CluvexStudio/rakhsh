@@ -18,6 +18,7 @@ const COMPRESS_BYTE: usize = 1;
 const CONTROL_DEFAULT: usize = 1250;
 
 const GRE_CARRIED: usize = 1427;
+const GRE6_CARRIED: usize = 1407;
 const ESP_CARRIED: usize = 1437;
 const TAGGED_CARRIED: usize = 1437;
 const L2_CARRIED: usize = 1405;
@@ -302,6 +303,7 @@ impl Plan {
 pub fn carried_payload(carrier: &str) -> Option<usize> {
     match carrier {
         "shabdiz-gre" => Some(GRE_CARRIED),
+        "shabdiz-gre6" => Some(GRE6_CARRIED),
         "shabdiz-esp" => Some(ESP_CARRIED),
         "shabdiz-ipip" | "shabdiz-6to4" | "shabdiz-etherip" | "shabdiz-l2tp" | "shabdiz-mpls" => {
             Some(TAGGED_CARRIED)

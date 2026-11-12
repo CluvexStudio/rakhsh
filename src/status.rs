@@ -15,12 +15,30 @@ pub fn get() -> Option<&'static Arc<Metrics>> {
     METRICS.get()
 }
 
-pub const DEFAULT_SOCKET: &str = "/run/rakhsh.sock";
+#[cfg(target_os = "linux")]
+pub fn default_socket() -> String {
+    "/run/rakhsh.sock".to_string()
+}
+
+#[cfg(target_os = "windows")]
+pub fn default_socket() -> String {
+    r"\\.\pipe\rakhsh".to_string()
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+pub fn default_socket() -> String {
+    if unsafe { libc::geteuid() } == 0 {
+        "/var/run/rakhsh.sock".to_string()
+    } else {
+        std::env::temp_dir()
+            .join("rakhsh.sock")
+            .to_string_lossy()
+            .into_owned()
+    }
+}
 
 pub fn socket_path(cfg: &Config) -> String {
-    cfg.control_socket
-        .clone()
-        .unwrap_or_else(|| DEFAULT_SOCKET.to_string())
+    cfg.control_socket.clone().unwrap_or_else(default_socket)
 }
 
 #[derive(Default)]
@@ -109,7 +127,7 @@ pub fn init(cfg: &Config, role: &str) -> Arc<Metrics> {
         limiter: Mutex::new(None),
         lanes: Mutex::new(BTreeMap::new()),
         sample: Mutex::new(Sample::default()),
-        cpu: Mutex::new(CpuSampler::default()),
+        cpu: Mutex::default(),
         speedtest: Mutex::new(None),
     });
     let _ = METRICS.set(m.clone());
@@ -416,29 +434,169 @@ pub struct SpeedResult {
 }
 
 #[cfg(unix)]
+mod ctl {
+    use std::io;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{UnixListener, UnixStream};
+
+    pub type Conn = UnixStream;
+    pub type ServerConn = UnixStream;
+
+    pub struct Listener(UnixListener);
+
+    pub async fn in_use(path: &str) -> bool {
+        UnixStream::connect(path).await.is_ok()
+    }
+
+    pub async fn bind(path: &str) -> io::Result<Listener> {
+        let _ = std::fs::remove_file(path);
+        if let Some(dir) = std::path::Path::new(path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        UnixListener::bind(path).map(Listener)
+    }
+
+    impl Listener {
+        pub async fn accept(&mut self) -> io::Result<ServerConn> {
+            self.0.accept().await.map(|(c, _)| c)
+        }
+    }
+
+    pub async fn connect(path: &str) -> io::Result<Conn> {
+        UnixStream::connect(path).await
+    }
+
+    pub async fn half_close(c: &mut Conn) {
+        let _ = c.shutdown().await;
+    }
+
+    pub async fn finish(mut c: ServerConn) {
+        let _ = c.shutdown().await;
+    }
+
+    pub fn describe(path: &str) -> String {
+        path.to_string()
+    }
+}
+
+#[cfg(windows)]
+mod ctl {
+    use std::io;
+    use std::time::Duration;
+    use tokio::net::windows::named_pipe::{
+        ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
+    };
+
+    const PIPE_BUSY: i32 = 231;
+    const PREFIX: &str = r"\\.\pipe\";
+
+    pub type Conn = NamedPipeClient;
+    pub type ServerConn = NamedPipeServer;
+
+    pub struct Listener {
+        name: String,
+        next: NamedPipeServer,
+    }
+
+    fn name_of(path: &str) -> String {
+        let p = path.replace('/', r"\");
+        if p.to_ascii_lowercase().starts_with(PREFIX) {
+            return p;
+        }
+        let stem = std::path::Path::new(&p)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("rakhsh");
+        format!("{PREFIX}{stem}")
+    }
+
+    pub async fn in_use(path: &str) -> bool {
+        ClientOptions::new().open(name_of(path)).is_ok()
+    }
+
+    pub async fn bind(path: &str) -> io::Result<Listener> {
+        let name = name_of(path);
+        let next = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&name)?;
+        Ok(Listener { name, next })
+    }
+
+    impl Listener {
+        pub async fn accept(&mut self) -> io::Result<ServerConn> {
+            self.next.connect().await?;
+            let fresh = ServerOptions::new().create(&self.name)?;
+            Ok(std::mem::replace(&mut self.next, fresh))
+        }
+    }
+
+    pub async fn connect(path: &str) -> io::Result<Conn> {
+        let name = name_of(path);
+        for _ in 0..20 {
+            match ClientOptions::new().open(&name) {
+                Ok(c) => return Ok(c),
+                Err(e) if e.raw_os_error() == Some(PIPE_BUSY) => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "the control pipe stayed busy",
+        ))
+    }
+
+    pub async fn half_close(_c: &mut Conn) {}
+
+    pub async fn finish(c: ServerConn) {
+        drop(c);
+    }
+
+    pub fn describe(path: &str) -> String {
+        name_of(path)
+    }
+}
+
+async fn read_reply(conn: &mut ctl::Conn) -> std::io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match conn.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => out.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => break,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(out)
+}
+
 pub async fn serve(path: String) {
-    if tokio::net::UnixStream::connect(&path).await.is_ok() {
+    if ctl::in_use(&path).await {
         warn!(
             "control socket {path} is already served by another running rakhsh, so this one \
              has no status socket; give it its own with control_socket"
         );
         return;
     }
-    let _ = std::fs::remove_file(&path);
-    if let Some(dir) = std::path::Path::new(&path).parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let listener = match tokio::net::UnixListener::bind(&path) {
+    let mut listener = match ctl::bind(&path).await {
         Ok(l) => l,
         Err(e) => {
             warn!("control socket {path}: {e} (status/panel disabled; set control_socket to a writable path)");
             return;
         }
     };
-    debug!("control socket on {path}");
+    debug!("control socket on {}", ctl::describe(&path));
     loop {
-        let Ok((mut conn, _)) = listener.accept().await else {
-            continue;
+        let mut conn = match listener.accept().await {
+            Ok(c) => c,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            }
         };
         tokio::spawn(async move {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -449,45 +607,38 @@ pub async fn serve(path: String) {
                 .and_then(|r| r.ok())
                 .unwrap_or(0);
             let verb = std::str::from_utf8(&cmd[..n]).unwrap_or("").trim();
-            let out = if verb == "speedtest" {
-                let r = match get() {
-                    Some(m) => m.run_speedtest().await,
-                    None => SpeedResult::default(),
-                };
-                serde_json::to_vec(
-                    &serde_json::json!({ "down_mbit": r.down_mbit, "up_mbit": r.up_mbit }),
-                )
-                .unwrap_or_else(|_| b"{}".to_vec())
-            } else {
-                match get().map(|m| m.snapshot()) {
+            let out = match verb {
+                "speedtest" => {
+                    let r = match get() {
+                        Some(m) => m.run_speedtest().await,
+                        None => SpeedResult::default(),
+                    };
+                    serde_json::to_vec(
+                        &serde_json::json!({ "down_mbit": r.down_mbit, "up_mbit": r.up_mbit }),
+                    )
+                    .unwrap_or_else(|_| b"{}".to_vec())
+                }
+                "status" => match get().map(|m| m.snapshot()) {
                     Some(s) => serde_json::to_vec(&s).unwrap_or_else(|_| b"{}".to_vec()),
                     None => b"{\"error\":\"not running\"}".to_vec(),
-                }
+                },
+                _ => b"{\"error\":\"unknown request\"}".to_vec(),
             };
             let _ = conn.write_all(&out).await;
             let _ = conn.write_all(b"\n").await;
-            let _ = conn.shutdown().await;
+            ctl::finish(conn).await;
         });
     }
 }
 
-#[cfg(not(unix))]
-pub async fn serve(_path: String) {
-    warn!(
-        "the control socket is Unix-only; status and the panel are not available on this platform"
-    );
-}
-
-#[cfg(unix)]
 pub async fn query_speedtest(path: &str) -> anyhow::Result<SpeedResult> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut conn = tokio::net::UnixStream::connect(path)
+    use tokio::io::AsyncWriteExt;
+    let mut conn = ctl::connect(path)
         .await
         .map_err(|e| anyhow::anyhow!("cannot reach the daemon on {path}: {e}"))?;
     conn.write_all(b"speedtest\n").await?;
-    conn.shutdown().await.ok();
-    let mut buf = Vec::new();
-    tokio::time::timeout(Duration::from_secs(25), conn.read_to_end(&mut buf))
+    ctl::half_close(&mut conn).await;
+    let buf = tokio::time::timeout(Duration::from_secs(25), read_reply(&mut conn))
         .await
         .map_err(|_| anyhow::anyhow!("speed test timed out"))??;
     let v: serde_json::Value = serde_json::from_slice(&buf)?;
@@ -497,46 +648,53 @@ pub async fn query_speedtest(path: &str) -> anyhow::Result<SpeedResult> {
     })
 }
 
-#[cfg(not(unix))]
-pub async fn query_speedtest(_path: &str) -> anyhow::Result<SpeedResult> {
-    anyhow::bail!("the control socket is Unix-only on this platform")
-}
-
-#[cfg(unix)]
 pub async fn query(path: &str) -> anyhow::Result<Snapshot> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut conn = tokio::net::UnixStream::connect(path)
+    use tokio::io::AsyncWriteExt;
+    let mut conn = ctl::connect(path)
         .await
         .map_err(|e| anyhow::anyhow!("cannot reach the daemon on {path}: {e} (is it running? is control_socket set to match?)"))?;
     conn.write_all(b"status\n").await?;
-    conn.shutdown().await.ok();
-    let mut buf = Vec::new();
-    conn.read_to_end(&mut buf).await?;
+    ctl::half_close(&mut conn).await;
+    let buf = read_reply(&mut conn).await?;
     Ok(serde_json::from_slice(&buf)?)
 }
 
-#[cfg(not(unix))]
-pub async fn query(_path: &str) -> anyhow::Result<Snapshot> {
-    anyhow::bail!("the control socket is Unix-only on this platform")
-}
-
+#[cfg(target_os = "linux")]
 fn hostname() -> String {
     std::fs::read_to_string("/proc/sys/kernel/hostname")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "node".into())
 }
 
+#[cfg(target_os = "linux")]
 fn self_mem() -> (u64, u64) {
     let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     let rss = field_kb(&s, "VmRSS:");
     (rss, 0)
 }
 
+#[cfg(target_os = "linux")]
 fn sys_mem() -> (u64, u64) {
     let s = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
     (field_kb(&s, "MemTotal:"), field_kb(&s, "MemAvailable:"))
 }
 
+#[cfg(not(target_os = "linux"))]
+fn hostname() -> String {
+    host::hostname()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn self_mem() -> (u64, u64) {
+    (host::self_rss_kb(), 0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sys_mem() -> (u64, u64) {
+    host::sys_mem_kb()
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn field_kb(s: &str, key: &str) -> u64 {
     s.lines()
         .find(|l| l.starts_with(key))
@@ -545,6 +703,7 @@ fn field_kb(s: &str, key: &str) -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(target_os = "linux")]
 fn loadavg() -> (f64, f64, f64) {
     let s = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
     let mut it = s.split_whitespace();
@@ -552,6 +711,104 @@ fn loadavg() -> (f64, f64, f64) {
     (p(it.next()), p(it.next()), p(it.next()))
 }
 
+#[cfg(not(target_os = "linux"))]
+fn loadavg() -> (f64, f64, f64) {
+    host::loadavg()
+}
+
+#[cfg(not(target_os = "linux"))]
+mod host {
+    use std::sync::Mutex;
+
+    use sysinfo::{
+        get_current_pid, CpuRefreshKind, MemoryRefreshKind, Pid, ProcessRefreshKind,
+        ProcessesToUpdate, RefreshKind, System,
+    };
+
+    struct State {
+        sys: System,
+        pid: Pid,
+    }
+
+    static STATE: Mutex<Option<State>> = Mutex::new(None);
+
+    fn with<T>(fallback: T, f: impl FnOnce(&mut State) -> T) -> T {
+        let Ok(mut guard) = STATE.lock() else {
+            return fallback;
+        };
+        if guard.is_none() {
+            let what = RefreshKind::nothing()
+                .with_memory(MemoryRefreshKind::nothing().with_ram())
+                .with_cpu(CpuRefreshKind::nothing().with_usage())
+                .with_processes(ProcessRefreshKind::nothing().with_cpu().with_memory());
+            let (Ok(sys), Ok(pid)) = (System::new_with_specifics(what), get_current_pid()) else {
+                return fallback;
+            };
+            *guard = Some(State { sys, pid });
+        }
+        match guard.as_mut() {
+            Some(state) => f(state),
+            None => fallback,
+        }
+    }
+
+    pub fn hostname() -> String {
+        System::host_name().unwrap_or_else(|_| "node".into())
+    }
+
+    pub fn loadavg() -> (f64, f64, f64) {
+        match System::load_average() {
+            Ok(l) => (l.one, l.five, l.fifteen),
+            Err(_) => (0.0, 0.0, 0.0),
+        }
+    }
+
+    pub fn sys_mem_kb() -> (u64, u64) {
+        with((0, 0), |state| {
+            state.sys.refresh_memory();
+            (
+                state.sys.total_memory() / 1024,
+                state.sys.available_memory() / 1024,
+            )
+        })
+    }
+
+    pub fn self_rss_kb() -> u64 {
+        with(0, |state| {
+            let pid = state.pid;
+            state.sys.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[pid]),
+                true,
+                ProcessRefreshKind::nothing().with_memory(),
+            );
+            state
+                .sys
+                .process(pid)
+                .map(|p| p.memory() / 1024)
+                .unwrap_or(0)
+        })
+    }
+
+    pub fn cpu() -> (f64, f64) {
+        with((0.0, 0.0), |state| {
+            let pid = state.pid;
+            state.sys.refresh_cpu_usage();
+            state.sys.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[pid]),
+                true,
+                ProcessRefreshKind::nothing().with_cpu(),
+            );
+            let mine = state
+                .sys
+                .process(pid)
+                .map(|p| p.cpu_usage() as f64)
+                .unwrap_or(0.0);
+            (mine, state.sys.global_cpu_usage() as f64)
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
 #[derive(Default)]
 struct CpuSampler {
     last_self: u64,
@@ -560,6 +817,19 @@ struct CpuSampler {
     clk: u64,
 }
 
+#[cfg(not(target_os = "linux"))]
+#[derive(Default)]
+struct CpuSampler;
+
+#[cfg(not(target_os = "linux"))]
+impl CpuSampler {
+    fn tick(&mut self, _dt: f64) -> (f64, f64) {
+        let (mine, all) = host::cpu();
+        (mine.max(0.0), all.clamp(0.0, 100.0))
+    }
+}
+
+#[cfg(target_os = "linux")]
 impl CpuSampler {
     fn tick(&mut self, dt: f64) -> (f64, f64) {
         if self.clk == 0 {
@@ -592,7 +862,7 @@ impl CpuSampler {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn clk_tck() -> u64 {
     let v = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     if v > 0 {
@@ -602,11 +872,7 @@ fn clk_tck() -> u64 {
     }
 }
 
-#[cfg(not(unix))]
-fn clk_tck() -> u64 {
-    100
-}
-
+#[cfg(target_os = "linux")]
 fn self_cpu_ticks() -> u64 {
     let s = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
     let after = s.rsplit_once(')').map(|(_, r)| r).unwrap_or(&s);
@@ -616,11 +882,13 @@ fn self_cpu_ticks() -> u64 {
     u + st
 }
 
+#[cfg(target_os = "linux")]
 fn sys_cpu_jiffies() -> (u64, u64) {
     let s = std::fs::read_to_string("/proc/stat").unwrap_or_default();
     parse_stat_cpu(&s)
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn parse_stat_cpu(s: &str) -> (u64, u64) {
     let Some(line) = s.lines().find(|l| l.starts_with("cpu ")) else {
         return (0, 0);

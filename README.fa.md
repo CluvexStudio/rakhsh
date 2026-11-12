@@ -194,14 +194,25 @@ final = "tunnel"
 
 | | |
 |---|---|
-| [CORE.md](CORE.md) | ورودی‌ها، خروجی‌ها و مسیریاب |
-| [LINKS.md](LINKS.md) | چند راه برای رسیدن به یک همتا، و این‌که کدام انتخاب می‌شود |
-| [SHABDIZ.md](SHABDIZ.md) | حاملِ دیتاگرامی، برای مسیرهایی که بقیه را رد می‌کنند |
-| [RESUME.md](RESUME.md) | زنده نگه داشتنِ جریان‌ها وقتی یک لِین می‌میرد |
-| [DNS.md](DNS.md) | ریزالورِ داخلی و مسیریابیِ تفکیک‌شده |
-| [LIMITS.md](LIMITS.md) | سهمیه‌ها و محدودیتِ نرخ |
-| [CONTROL.md](CONTROL.md) | دیدن و مدیریتِ ناوگان از یک میزبان |
-| [SECURITY.md](SECURITY.md) | مدلِ تهدید، و این‌که واقعاً چه چیزی محافظت می‌شود |
+| [CORE.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/overview/) | ورودی‌ها، خروجی‌ها و مسیریاب |
+| [LINKS.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/links/) | چند راه برای رسیدن به یک همتا، و این‌که کدام انتخاب می‌شود |
+| [SHABDIZ.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/datagram/) | حاملِ دیتاگرامی، برای مسیرهایی که بقیه را رد می‌کنند |
+| [RESUME.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/resume/) | زنده نگه داشتنِ جریان‌ها وقتی یک لِین می‌میرد |
+| [DNS.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/dns/) | ریزالورِ داخلی و مسیریابیِ تفکیک‌شده |
+| [LIMITS.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/limits/) | سهمیه‌ها و محدودیتِ نرخ |
+| [CONTROL.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/control/) | دیدن و مدیریتِ ناوگان از یک میزبان |
+| [SECURITY.md](https://cluvexstudio.dev/fa/rakhsh/docs/guide/security/) | مدلِ تهدید، و این‌که واقعاً چه چیزی محافظت می‌شود |
+
+## حمایت
+
+اگر رخش برایتان مفید است، یک کمکِ مالی کار را ادامه‌دار می‌کند و هزینهٔ سرورهایی را که
+اندازه‌گیری‌ها روی آن‌ها انجام می‌شود می‌پردازد. روی هر شبکه فقط داراییِ همان شبکه را بفرستید.
+
+| شبکه | چه بفرستید | آدرس |
+|---|---|---|
+| ترون (TRC-20) | TRX / USDT | `TRxVSHcoADZnBfztFmFb2TQopusAwWYEVR` |
+| بی‌ان‌بی (BEP-20) | USDT | `0x20c980AEF36Aa71D0A0e7bE382AeD20b73bC6D27` |
+| تون (TON) | TON | `UQAH75bXaaRUhZMwiF0ZujOXFDDmvLSPASKoOsWF0HNasiaM` |
 
 ## لایسنس
 

@@ -27,6 +27,7 @@ pub const DATAGRAM_CARRIERS: &[&str] = &[
     "shabdiz-udp",
     "shabdiz-tcp",
     "shabdiz-gre",
+    "shabdiz-gre6",
     "shabdiz-ipip",
     "shabdiz-6to4",
     "shabdiz-etherip",
@@ -36,6 +37,7 @@ pub const DATAGRAM_CARRIERS: &[&str] = &[
     "shabdiz-l2",
 ];
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const PROTOCOLS: &[(u8, &str)] = &[
     (4, "IPv4-in-IPv4"),
     (41, "IPv6-in-IPv4"),
@@ -166,6 +168,7 @@ pub fn needs_root(name: &str) -> bool {
         || matches!(
             name,
             "shabdiz-gre"
+                | "shabdiz-gre6"
                 | "shabdiz-esp"
                 | "shabdiz-ipip"
                 | "shabdiz-6to4"
@@ -180,6 +183,7 @@ pub fn needs_public_address(name: &str) -> bool {
     matches!(
         name,
         "shabdiz-gre"
+            | "shabdiz-gre6"
             | "shabdiz-esp"
             | "shabdiz-ipip"
             | "shabdiz-6to4"
@@ -811,6 +815,7 @@ fn count_protocol(proto: u8, want: [u8; PROTO_MAGIC], until: Instant) -> std::io
     Ok(seen)
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn protocol_body(token: &str) -> Vec<u8> {
     let mut body = magic(token).to_vec();
     body.resize(PROTO_BODY, 0);

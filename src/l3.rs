@@ -59,7 +59,14 @@ pub fn setup(cfg: &Config) -> Result<Option<Arc<L3>>> {
             IpAddr::V6(v6) => b = b.ipv6(*v6, *prefix),
         }
     }
-    let dev = b.build_async().context("creating TUN device")?;
+    let dev = b.build_async().with_context(|| {
+        if cfg!(target_os = "windows") {
+            "creating the TUN device: layer-3 mode on Windows needs wintun.dll beside \
+             rakhsh.exe and an elevated prompt"
+        } else {
+            "creating TUN device"
+        }
+    })?;
     let dev = Arc::new(dev);
 
     if let Ok(name) = dev.name() {

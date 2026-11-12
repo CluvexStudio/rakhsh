@@ -432,23 +432,81 @@ enum Inner {
         spoof_peer: Option<Ipv4Addr>,
         fec: Option<(usize, usize)>,
         reliability: String,
+        header: TcpHeader,
+        tuning: RawTuning,
         counter: Arc<AtomicU64>,
     },
     RamaQuic(Arc<crate::ramaquic::RamaQuic>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TcpHeader {
+    Bare,
+    Linux,
+}
+
+impl TcpHeader {
+    pub(crate) fn parse(s: Option<&str>) -> Result<TcpHeader> {
+        match s {
+            None | Some("bare") => Ok(TcpHeader::Bare),
+            Some("linux") => Ok(TcpHeader::Linux),
+            Some(other) => bail!("faketcp_header must be \"bare\" or \"linux\" (got \"{other}\")"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RawTuning {
+    pub(crate) window: u32,
+    pub(crate) bbr: bool,
+    pub(crate) lanes: u64,
+}
+
+impl RawTuning {
+    pub(crate) fn from_cfg(cfg: &crate::config::Config) -> Result<RawTuning> {
+        let mb = cfg.raw_window_mb.unwrap_or(1);
+        if !(1..=64).contains(&mb) {
+            bail!("raw_window_mb must be between 1 and 64 (got {mb})");
+        }
+        let bbr = match cfg.raw_congestion.as_deref() {
+            None | Some("cubic") => false,
+            Some("bbr") => true,
+            Some(other) => bail!("raw_congestion must be \"cubic\" or \"bbr\" (got \"{other}\")"),
+        };
+        let lanes = cfg.raw_lanes.unwrap_or(crate::raw::RAW_LANES);
+        if !(1..=8).contains(&lanes) {
+            bail!("raw_lanes must be between 1 and 8 (got {lanes})");
+        }
+        Ok(RawTuning {
+            window: mb << 20,
+            bbr,
+            lanes,
+        })
+    }
+}
+
 impl Carrier {
     pub fn lanes_override(&self) -> Option<usize> {
         match &*self.0 {
-            Inner::Raw { .. } => Some(crate::raw::RAW_LANES as usize),
+            Inner::Raw { tuning, .. } => Some(tuning.lanes as usize),
             _ => None,
         }
     }
 
     pub fn from_cfg(cfg: &crate::config::Config) -> Result<Carrier> {
+        fn dials_ipv6(cfg: &crate::config::Config) -> bool {
+            let v6 = |s: &str| {
+                let s = s.trim();
+                s.parse::<std::net::SocketAddr>()
+                    .map(|a| a.is_ipv6())
+                    .unwrap_or_else(|_| s.starts_with('['))
+            };
+            cfg.tunnel_connect.as_deref().is_some_and(v6) || cfg.link.iter().any(|l| v6(&l.addr))
+        }
+
         let kind = cfg.carrier.as_deref().unwrap_or("tcp");
         quic::set_congestion(cfg.congestion.as_deref());
-        quic::set_bind(cfg.bind.as_deref());
+        quic::set_bind(cfg.bind.as_deref(), dials_ipv6(cfg));
         let sni = cfg.sni.as_deref().unwrap_or("www.cloudflare.com");
         let ws_path = cfg.ws_path.as_deref().unwrap_or("/");
         let parse_ip =
@@ -489,6 +547,8 @@ impl Carrier {
                     _ => None,
                 },
                 reliability: cfg.reliability.clone().unwrap_or_else(|| "quic".into()),
+                header: TcpHeader::parse(cfg.faketcp_header.as_deref())?,
+                tuning: RawTuning::from_cfg(cfg)?,
                 counter: Arc::new(AtomicU64::new(0)),
             },
             "tcp" | "tls" | "ws" | "wss" => {
@@ -611,6 +671,8 @@ impl Carrier {
                 counter,
                 fec,
                 reliability,
+                header,
+                tuning,
                 ..
             } => {
                 let peer = raw_peer_ip(addr).await?;
@@ -621,6 +683,8 @@ impl Carrier {
                     spoof,
                     fec: *fec,
                     reliability,
+                    header: *header,
+                    tuning: *tuning,
                 };
                 crate::raw::connect(dial, true, Some(peer), lane).await
             }
@@ -676,6 +740,8 @@ impl Carrier {
                 spoof_peer,
                 fec,
                 reliability,
+                header,
+                tuning,
                 ..
             } => Ok(Listener::Raw {
                 kind: kind.clone(),
@@ -684,6 +750,8 @@ impl Carrier {
                 spoof_peer: *spoof_peer,
                 fec: *fec,
                 reliability: reliability.clone(),
+                header: *header,
+                tuning: *tuning,
                 counter: AtomicU64::new(0),
             }),
             Inner::RamaQuic(_) => Ok(Listener::RamaQuic(
@@ -809,6 +877,8 @@ pub enum Listener {
         spoof_peer: Option<Ipv4Addr>,
         fec: Option<(usize, usize)>,
         reliability: String,
+        header: TcpHeader,
+        tuning: RawTuning,
         counter: AtomicU64,
     },
     RamaQuic(rama::quic::Endpoint),
@@ -875,10 +945,12 @@ impl Listener {
                 spoof_peer,
                 fec,
                 reliability,
+                header,
+                tuning,
                 counter,
             } => {
                 let lane = counter.fetch_add(1, SeqCst);
-                if lane >= crate::raw::RAW_LANES {
+                if lane >= tuning.lanes {
                     std::future::pending::<()>().await;
                 }
                 let dial = crate::raw::Dial {
@@ -887,6 +959,8 @@ impl Listener {
                     spoof,
                     fec: *fec,
                     reliability,
+                    header: *header,
+                    tuning: *tuning,
                 };
                 crate::raw::connect(dial, false, *spoof_peer, lane).await
             }
@@ -895,11 +969,14 @@ impl Listener {
     }
 }
 
-pub(crate) fn raw_quic_configs() -> Result<(quinn::ServerConfig, quinn::ClientConfig)> {
+#[cfg(target_os = "linux")]
+pub(crate) fn raw_quic_configs(
+    tuning: RawTuning,
+) -> Result<(quinn::ServerConfig, quinn::ClientConfig)> {
     let mut s = quic::server_config("rakhsh")?;
     let mut c = quic::client_config(1)?;
-    s.transport_config(quic::transport_raw());
-    c.transport_config(quic::transport_raw());
+    s.transport_config(quic::transport_raw(tuning));
+    c.transport_config(quic::transport_raw(tuning));
     Ok((s, c))
 }
 
@@ -1071,15 +1148,18 @@ mod quic {
 
     static BIND: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-    pub fn set_bind(addr: Option<&str>) {
-        if let Some(a) = addr {
-            let with_port = if a.contains(':') {
-                a.to_string()
-            } else {
-                format!("{a}:0")
-            };
-            let _ = BIND.set(with_port);
-        }
+    pub fn set_bind(addr: Option<&str>, v6_peer: bool) {
+        let chosen = match addr.map(str::trim) {
+            Some(a) if a.parse::<std::net::SocketAddr>().is_ok() => a.to_string(),
+            Some(a) => match a.parse::<std::net::IpAddr>() {
+                Ok(std::net::IpAddr::V6(ip)) => format!("[{ip}]:0"),
+                Ok(ip) => format!("{ip}:0"),
+                Err(_) => format!("{a}:0"),
+            },
+            None if v6_peer => "[::]:0".to_string(),
+            None => return,
+        };
+        let _ = BIND.set(chosen);
     }
 
     fn local() -> &'static str {
@@ -1112,11 +1192,16 @@ mod quic {
         Arc::new(tc)
     }
 
-    pub fn transport_raw() -> Arc<quinn::TransportConfig> {
+    #[cfg(target_os = "linux")]
+    pub fn transport_raw(tuning: RawTuning) -> Arc<quinn::TransportConfig> {
         let mut tc = quinn::TransportConfig::default();
-        tc.congestion_controller_factory(Arc::new(quinn::congestion::CubicConfig::default()));
-        tc.stream_receive_window(quinn::VarInt::from_u32(1024 * 1024));
-        tc.send_window(2 * 1024 * 1024);
+        if tuning.bbr {
+            tc.congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
+        } else {
+            tc.congestion_controller_factory(Arc::new(quinn::congestion::CubicConfig::default()));
+        }
+        tc.stream_receive_window(quinn::VarInt::from_u32(tuning.window));
+        tc.send_window(2 * u64::from(tuning.window));
         tc.max_concurrent_bidi_streams(8u32.into());
         tc.keep_alive_interval(Some(std::time::Duration::from_secs(10)));
         tc.initial_mtu(1200);

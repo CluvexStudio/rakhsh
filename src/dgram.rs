@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,7 @@ const FLOW_IDLE: Duration = Duration::from_secs(120);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Gre,
+    Gre6,
     Esp,
     Tagged,
     L2,
@@ -33,6 +34,7 @@ enum Kind {
 struct Tagged {
     proto: libc::c_int,
     name: &'static str,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     context: &'static str,
 }
 
@@ -86,6 +88,7 @@ fn tagged_spec(carrier: &str) -> Option<&'static Tagged> {
 fn kind_of(carrier: &str) -> Option<Kind> {
     match carrier {
         "shabdiz-gre" => Some(Kind::Gre),
+        "shabdiz-gre6" => Some(Kind::Gre6),
         "shabdiz-esp" => Some(Kind::Esp),
         "shabdiz-l2" => Some(Kind::L2),
         "shabdiz-udp" => Some(Kind::Udp),
@@ -179,6 +182,16 @@ pub fn describe(cfg: &Config) -> Vec<String> {
              1.39% — against 32 Mbit/s at 0.5-8% for shabdiz-l2."
                 .to_string(),
         );
+    }
+    if kind == Kind::Gre6 {
+        out.push(
+            "  IPv6 next-header 47, the same bridged Ethernet frame as shabdiz-gre. Worth \
+             trying where the v4 path drops protocol 47, since filtering is often built for \
+             v4 only; it costs 20 bytes more header, so the carried mtu is 20 lower."
+                .to_string(),
+        );
+    }
+    if matches!(kind, Kind::Gre | Kind::Gre6) {
         out.push(
             "  needs root (CAP_NET_RAW), and has no ports, so both ends need a public address — \
              it cannot cross NAT. Either end may open the flow."
@@ -326,6 +339,9 @@ pub fn validate(cfg: &Config) -> Result<()> {
     if matches!(kind, Kind::Gre | Kind::Esp | Kind::Tagged | Kind::L2) {
         peer_host(cfg, cfg.carrier.as_deref().unwrap_or("shabdiz"))?;
     }
+    if kind == Kind::Gre6 {
+        peer_host6(cfg, "shabdiz-gre6")?;
+    }
     Ok(())
 }
 
@@ -358,10 +374,12 @@ pub async fn run(cfg: Config) -> Result<()> {
             ign.join(", ")
         );
     }
+    let metrics = crate::status::init(&cfg, &cfg.role);
+    tokio::spawn(crate::status::serve(crate::status::socket_path(&cfg)));
 
     let mut backoff = Duration::from_millis(500);
     loop {
-        match serve_once(&cfg, dialer, fwd).await {
+        match serve_once(&cfg, dialer, fwd, &metrics).await {
             Ok(()) => backoff = Duration::from_millis(500),
             Err(e) => {
                 warn!("shabdiz session ended: {e:#}");
@@ -397,9 +415,16 @@ fn one_udp_forward(cfg: &Config) -> Result<(SocketAddr, SocketAddr)> {
     ))
 }
 
-async fn serve_once(cfg: &Config, dialer: bool, fwd: (SocketAddr, SocketAddr)) -> Result<()> {
+async fn serve_once(
+    cfg: &Config,
+    dialer: bool,
+    fwd: (SocketAddr, SocketAddr),
+    metrics: &crate::status::Metrics,
+) -> Result<()> {
     let (handle, carrier) = open(cfg, dialer).await?;
     let label = if dialer { "dialer" } else { "responder" };
+    metrics.lane_up(0, cfg.carrier.as_deref().unwrap_or_default());
+    let meter = tokio::spawn(meter(handle.clone()));
     let probe = {
         let handle = handle.clone();
         let openvpn = cfg.openvpn.clone();
@@ -417,6 +442,8 @@ async fn serve_once(cfg: &Config, dialer: bool, fwd: (SocketAddr, SocketAddr)) -
     };
     report.abort();
     probe.abort();
+    meter.abort();
+    metrics.lane_down(0);
     info!("shabdiz {label} session closed: {:?}", handle.snapshot());
     res
 }
@@ -444,6 +471,15 @@ async fn announce_path_mtu(handle: Arc<Handle>, openvpn: Option<crate::openvpn::
 
 fn apply_pacing(cfg: &Config, c: &Arc<dyn Carrier>) {
     let Some(p) = c.pacer() else { return };
+    if c.kernel_paced() {
+        info!(
+            "shabdiz pacing: the kernel holds each packet to its own departure time; this needs \
+             the fq qdisc to take effect (`rakhsh optimize` sets it as the default), and without \
+             it the gaps are shaped in user space as before"
+        );
+    } else {
+        info!("shabdiz pacing: gaps are shaped in user space");
+    }
     if cfg.pace_auto.unwrap_or(false) {
         p.enable_auto_rate();
         info!("shabdiz pacing: adapting the rate from the loss the far end reports");
@@ -487,7 +523,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
                     .ok_or_else(|| anyhow!("shabdiz-udp needs tunnel_connect on the dialling end"))?
                     .parse()
                     .context("tunnel_connect")?;
-                let local = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+                let local = shabdiz::carrier::udp::wildcard_for(peer);
                 Ok(Arc::new(
                     Udp::connect(local, peer)
                         .await
@@ -553,6 +589,24 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
             ))
         }
         #[cfg(target_os = "linux")]
+        Kind::Gre6 => {
+            let peer_ip = peer_addr6(cfg, "shabdiz-gre6").await?;
+            let (entry_mac, exit_mac) = gre::macs(cfg.token.as_bytes());
+            let (local, peer) = if cfg.role == "entry" {
+                (entry_mac, exit_mac)
+            } else {
+                (exit_mac, entry_mac)
+            };
+            let mtu = gre::path_mtu6(1500);
+            info!(
+                "shabdiz-gre6: [{peer_ip}] on IPv6 next-header 47, mtu {mtu}, up to {} datagrams per syscall",
+                shabdiz::carrier::BATCH
+            );
+            Ok(Arc::new(gre::open6(peer_ip, local, peer, mtu).context(
+                "opening the GRE-over-IPv6 carrier (needs root)",
+            )?))
+        }
+        #[cfg(target_os = "linux")]
         Kind::Esp => {
             let peer_ip = peer_addr(cfg, "shabdiz-esp").await?;
             let (entry_spi, exit_spi) = esp::spis(cfg.token.as_bytes());
@@ -612,7 +666,7 @@ async fn build_carrier_inner(cfg: &Config, kind: Kind, dialer: bool) -> Result<A
             ))
         }
         #[cfg(not(target_os = "linux"))]
-        Kind::Gre | Kind::Esp | Kind::Tagged | Kind::L2 => anyhow::bail!(
+        Kind::Gre | Kind::Gre6 | Kind::Esp | Kind::Tagged | Kind::L2 => anyhow::bail!(
             "this shabdiz raw carrier needs Linux raw sockets; use shabdiz-udp, shabdiz-tcp, \
              or a stream carrier (quic, wss, tls) on this platform"
         ),
@@ -634,6 +688,7 @@ pub(crate) fn peer_host<'a>(cfg: &'a Config, what: &str) -> Result<&'a str> {
     Ok(host)
 }
 
+#[cfg(target_os = "linux")]
 async fn peer_addr(cfg: &Config, what: &str) -> Result<Ipv4Addr> {
     match (&cfg.peer_ip, &cfg.tunnel_connect) {
         (Some(h), _) => peer_ipv4(h, "peer_ip").await,
@@ -774,7 +829,7 @@ async fn exit_bridge(h: Arc<Handle>, target: SocketAddr) -> Result<()> {
             let sock = match known {
                 Some(s) => s,
                 None => {
-                    let local = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+                    let local = shabdiz::carrier::udp::wildcard_for(target);
                     let Ok(s) = UdpSocket::bind(local).await else {
                         continue;
                     };
@@ -817,6 +872,17 @@ async fn exit_bridge(h: Arc<Handle>, target: SocketAddr) -> Result<()> {
     bail!("the session ended")
 }
 
+async fn meter(h: Arc<Handle>) {
+    let (mut tx, mut rx) = (0u64, 0u64);
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let s = h.snapshot();
+        crate::stats::add_tx(s.tx_bytes.saturating_sub(tx) as usize);
+        crate::stats::add_rx(s.rx_bytes.saturating_sub(rx) as usize);
+        (tx, rx) = (s.tx_bytes, s.rx_bytes);
+    }
+}
+
 async fn report(h: Arc<Handle>, carrier: Arc<dyn Carrier>) {
     let mut last = (0u64, 0u64);
     loop {
@@ -857,6 +923,63 @@ async fn report(h: Arc<Handle>, carrier: Arc<dyn Carrier>) {
                 None => String::new(),
             },
         );
+    }
+}
+
+pub(crate) fn peer_host6<'a>(cfg: &'a Config, what: &str) -> Result<&'a str> {
+    let host = match (&cfg.peer_ip, &cfg.tunnel_connect) {
+        (Some(h), _) => h.trim(),
+        (None, Some(c)) => strip_port6(c.trim()),
+        (None, None) => bail!("{what} needs peer_ip (or tunnel_connect) to reach the far end"),
+    };
+    if host.is_empty() {
+        bail!("{what}: peer_ip is empty");
+    }
+    if host.parse::<Ipv4Addr>().is_ok() {
+        bail!("{what}: {host} is IPv4; use shabdiz-gre for that, this one rides on IPv6");
+    }
+    Ok(host)
+}
+
+fn strip_port6(addr: &str) -> &str {
+    if let Some(end) = addr.strip_prefix('[').and_then(|r| r.find(']')) {
+        return &addr[1..=end];
+    }
+    if addr.parse::<std::net::Ipv6Addr>().is_ok() {
+        return addr;
+    }
+    addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(addr)
+}
+
+#[cfg(target_os = "linux")]
+async fn peer_addr6(cfg: &Config, what: &str) -> Result<std::net::Ipv6Addr> {
+    let host = peer_host6(cfg, what)?;
+    peer_ipv6(host, what).await
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) async fn peer_ipv6(host: &str, what: &str) -> anyhow::Result<std::net::Ipv6Addr> {
+    use anyhow::{bail, Context};
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if host.is_empty() {
+        bail!("{what} is empty");
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv6Addr>() {
+        return Ok(ip);
+    }
+    let found = tokio::net::lookup_host((host, 0))
+        .await
+        .with_context(|| format!("resolving {what} {host}"))?
+        .find_map(|a| match a.ip() {
+            std::net::IpAddr::V6(v6) => Some(v6),
+            std::net::IpAddr::V4(_) => None,
+        });
+    match found {
+        Some(ip) => {
+            tracing::info!("{what} {host} resolved to {ip}");
+            Ok(ip)
+        }
+        None => bail!("{what} {host} has no AAAA record; this carrier rides on IPv6"),
     }
 }
 

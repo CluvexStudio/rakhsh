@@ -192,7 +192,9 @@ fn render(
         }
         .port()
         .unwrap_or(spec.port);
-        s.push_str(&format!("tunnel_listen = \"0.0.0.0:{port}\"\n"));
+        let v6 = me.addr.trim().starts_with('[') || me.addr.contains("::");
+        let any = if v6 { "[::]" } else { "0.0.0.0" };
+        s.push_str(&format!("tunnel_listen = \"{any}:{port}\"\n"));
     }
     s.push_str(&format!(
         "control_socket = \"/run/rakhsh-{}.sock\"\n",

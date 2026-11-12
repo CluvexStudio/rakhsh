@@ -56,6 +56,10 @@ reed-solomon-simd = "=3.1.0"
 libc = "=0.2.191"
 rama = { git = "https://github.com/plabayo/rama", rev = "ec92b76", default-features = false, features = ["quic", "rustls", "ring"] }
 
+# Host metrics come from /proc on Linux; everywhere else they come from here.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+sysinfo = { version = "=0.40.1", default-features = false, features = ["system"] }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 # Raw-packet carriers on Windows need a driver: the kernel blocks crafted TCP
 # from user space. WinDivert is that driver, and "static" vendors its SDK. Its

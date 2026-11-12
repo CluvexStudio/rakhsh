@@ -311,6 +311,7 @@ async fn udp_associate(e: &Engine, mut ctl: TcpStream, peer: SocketAddr, tag: &s
     let relay = Arc::new(UdpSocket::bind(SocketAddr::new(local.ip(), 0)).await?);
     let bnd = relay.local_addr()?;
     let direct = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+    let direct6 = UdpSocket::bind("[::]:0").await.ok().map(Arc::new);
     proxy::socks_reply_addr(&mut ctl, bnd).await?;
     if e.access_log {
         info!("{peer} udp-associate relay on {bnd}");
@@ -319,21 +320,28 @@ async fn udp_associate(e: &Engine, mut ctl: TcpStream, peer: SocketAddr, tag: &s
     let client_addr: Arc<std::sync::Mutex<Option<SocketAddr>>> =
         Arc::new(std::sync::Mutex::new(None));
 
-    let (relay_r, direct_r, client_r) = (relay.clone(), direct.clone(), client_addr.clone());
-    let back_direct = tokio::spawn(async move {
-        let mut buf = vec![0u8; 65535];
-        while let Ok((n, from)) = direct_r.recv_from(&mut buf).await {
-            let Some(c) = *client_r.lock().unwrap() else {
-                continue;
-            };
-            let mut out = proxy::udp_reply_header(&Dest {
-                host: Host::Ip(from.ip()),
-                port: from.port(),
-            });
-            out.extend_from_slice(&buf[..n]);
-            let _ = relay_r.send_to(&out, c).await;
-        }
-    });
+    let answers = |sock: Arc<UdpSocket>,
+                   back: Arc<UdpSocket>,
+                   who: Arc<std::sync::Mutex<Option<SocketAddr>>>| {
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65535];
+            while let Ok((n, from)) = sock.recv_from(&mut buf).await {
+                let Some(c) = *who.lock().unwrap() else {
+                    continue;
+                };
+                let mut out = proxy::udp_reply_header(&Dest {
+                    host: Host::Ip(from.ip()),
+                    port: from.port(),
+                });
+                out.extend_from_slice(&buf[..n]);
+                let _ = back.send_to(&out, c).await;
+            }
+        })
+    };
+    let back_direct = answers(direct.clone(), relay.clone(), client_addr.clone());
+    let back_direct6 = direct6
+        .clone()
+        .map(|s| answers(s, relay.clone(), client_addr.clone()));
 
     let mut flows: HashMap<String, (crate::entry::TunnelUdp, tokio::task::JoinHandle<()>)> =
         HashMap::new();
@@ -386,7 +394,14 @@ async fn udp_associate(e: &Engine, mut ctl: TcpStream, peer: SocketAddr, tag: &s
                             Host::Domain(d) => tokio::net::lookup_host((d.as_str(), dest.port)).await.ok().and_then(|mut a| a.next()).map(|a| a.ip()),
                         };
                         if let Some(ip) = ip {
-                            let _ = direct.send_to(data, SocketAddr::new(ip, dest.port)).await;
+                            let out = match (ip.is_ipv6(), direct6.as_ref()) {
+                                (true, Some(s)) => Some(s),
+                                (true, None) => None,
+                                (false, _) => Some(&direct),
+                            };
+                            if let Some(s) = out {
+                                let _ = s.send_to(data, SocketAddr::new(ip, dest.port)).await;
+                            }
                         }
                     }
                     Some(Out::Socks { .. }) => {}
@@ -395,6 +410,9 @@ async fn udp_associate(e: &Engine, mut ctl: TcpStream, peer: SocketAddr, tag: &s
         }
     }
     back_direct.abort();
+    if let Some(h) = back_direct6 {
+        h.abort();
+    }
     for (_, (tu, h)) in flows.drain() {
         h.abort();
         tu.close().await;

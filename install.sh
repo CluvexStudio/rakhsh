@@ -308,7 +308,7 @@ create_tunnel(){
   case "$c" in 2) carrier=quicv2;; 3) carrier=tls;; 4) carrier=kcp;; 5) carrier=tcp;; *) carrier=wss;; esac
   case "$carrier" in wss|tls|ws) ask "SNI / fake host" www.bing.com sni;; esac
 
-  printf "\n  Fallback carriers ${GRY}(optional — if the main carrier is blocked the tunnel moves to these by itself and back; see LINKS.md)${R}\n"
+  printf "\n  Fallback carriers ${GRY}(optional: if the main carrier is blocked the tunnel moves to these by itself and back, see cluvexstudio.dev/rakhsh/docs/guide/links)${R}\n"
   printf "    any of ${B}quicv2 kcp tcp tls wss${R}, space-separated; ${B}CARRIER:PORT${R} for its own port (a TCP carrier can't reuse the tunnel's TCP port).\n"
   printf "    ${GRY}e.g.  quicv2 kcp${R}   — press Enter for none\n"
   ask "fallbacks" "" links_in

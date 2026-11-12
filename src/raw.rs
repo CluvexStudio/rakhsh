@@ -14,7 +14,9 @@ use tracing::info;
 mod spoof_test;
 pub use spoof_test::{parse_candidates, recv as spoof_test_recv, send as spoof_test_send};
 
-use crate::carrier::{split_bytes_unbuffered, BoxRx, BoxTx, FrameRx, FrameTx};
+use crate::carrier::{
+    split_bytes_unbuffered, BoxRx, BoxTx, FrameRx, FrameTx, RawTuning, TcpHeader,
+};
 use crate::wire::{read_frame, write_frame};
 
 pub const RAW_LANES: u64 = 1;
@@ -457,38 +459,68 @@ struct FakeTcpLink {
     sport: u16,
     dport: u16,
     seq: AtomicU32,
+    header: TcpHeader,
+    ts: AtomicU32,
 }
 
 impl FakeTcpLink {
     fn build_into(&self, peer: Ipv4Addr, payload: &[u8], seg: &mut Vec<u8>) {
-        let seq = self.seq.fetch_add(payload.len().max(1) as u32, SeqCst);
-        craft_tcp_segment(self.src_ip, peer, self.sport, self.dport, seq, payload, seg);
+        let c = TcpCraft {
+            src_ip: self.src_ip,
+            peer,
+            sport: self.sport,
+            dport: self.dport,
+            seq: self.seq.fetch_add(payload.len().max(1) as u32, SeqCst),
+            ts: match self.header {
+                TcpHeader::Bare => None,
+                TcpHeader::Linux => Some(self.ts.fetch_add(1, SeqCst)),
+            },
+        };
+        craft_tcp_segment(&c, payload, seg);
     }
 }
 
-fn craft_tcp_segment(
+struct TcpCraft {
     src_ip: Ipv4Addr,
     peer: Ipv4Addr,
     sport: u16,
     dport: u16,
     seq: u32,
-    payload: &[u8],
-    seg: &mut Vec<u8>,
-) {
+    ts: Option<u32>,
+}
+
+const TCP_OPTS: usize = 20;
+
+fn push_tcp_options(buf: &mut Vec<u8>, tsval: u32) {
+    buf.extend_from_slice(&[2, 4, 0x05, 0xb4]);
+    buf.push(1);
+    buf.extend_from_slice(&[3, 3, 7]);
+    buf.push(1);
+    buf.push(1);
+    buf.extend_from_slice(&[8, 10]);
+    buf.extend_from_slice(&tsval.to_be_bytes());
+    buf.extend_from_slice(&0u32.to_be_bytes());
+}
+
+fn craft_tcp_segment(c: &TcpCraft, payload: &[u8], seg: &mut Vec<u8>) {
+    let opts = if c.ts.is_some() { TCP_OPTS } else { 0 };
     seg.clear();
-    seg.reserve(20 + payload.len());
-    seg.extend_from_slice(&sport.to_be_bytes());
-    seg.extend_from_slice(&dport.to_be_bytes());
-    seg.extend_from_slice(&seq.to_be_bytes());
+    seg.reserve(20 + opts + payload.len());
+    seg.extend_from_slice(&c.sport.to_be_bytes());
+    seg.extend_from_slice(&c.dport.to_be_bytes());
+    seg.extend_from_slice(&c.seq.to_be_bytes());
     seg.extend_from_slice(&0u32.to_be_bytes());
-    seg.push(5 << 4);
+    seg.push((((20 + opts) / 4) << 4) as u8);
     seg.push(0b0001_1000);
     seg.extend_from_slice(&65535u16.to_be_bytes());
     seg.extend_from_slice(&[0, 0]);
     seg.extend_from_slice(&[0, 0]);
+    if let Some(ts) = c.ts {
+        push_tcp_options(seg, ts);
+    }
     seg.extend_from_slice(payload);
-    let c = checksum(seg, pseudo_sum(src_ip, peer, 6, seg.len()));
-    seg[16..18].copy_from_slice(&c.to_be_bytes());
+    let sum = checksum(seg, pseudo_sum(c.src_ip, c.peer, 6, seg.len()));
+    seg[16..18].copy_from_slice(&sum.to_be_bytes());
 }
 
 #[async_trait]
@@ -723,7 +755,98 @@ fn nft_load(script: &str) -> bool {
     child.wait().map(|s| s.success()).unwrap_or(false) && wrote
 }
 
+fn text(cmd: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if out.status.success() {
+        String::from_utf8(out.stdout).ok()
+    } else {
+        None
+    }
+}
+
+fn running(pid: &str) -> bool {
+    !pid.is_empty()
+        && pid.bytes().all(|b| b.is_ascii_digit())
+        && std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+fn owner(tag: &str) -> Option<(&str, &str, &str)> {
+    let rest = tag.strip_prefix("rakhsh-")?;
+    let (what, rest) = rest.split_once('-')?;
+    let (port, pid) = rest.split_once('-')?;
+    if port.parse::<u16>().is_ok() && !pid.contains('-') {
+        Some((what, port, pid))
+    } else {
+        None
+    }
+}
+
+fn sweep_stale() {
+    for (table, chain) in [
+        ("filter", "OUTPUT"),
+        ("raw", "PREROUTING"),
+        ("raw", "OUTPUT"),
+    ] {
+        let Some(listing) = text("iptables", &["-t", table, "-S", chain]) else {
+            continue;
+        };
+        for line in listing.lines() {
+            let Some(tag) = line
+                .split("--comment ")
+                .nth(1)
+                .map(|r| r.trim_start_matches('"'))
+                .and_then(|r| r.split(['"', ' ']).next())
+            else {
+                continue;
+            };
+            let Some((what, port, pid)) = owner(tag) else {
+                continue;
+            };
+            if running(pid) {
+                continue;
+            }
+            let del = match what {
+                "faketcp" => rst_rule(port, tag, "-D"),
+                "l2" if chain == "PREROUTING" => {
+                    notrack_rule("PREROUTING", "--dport", port, tag, "-D")
+                }
+                "l2" => notrack_rule("OUTPUT", "--sport", port, tag, "-D"),
+                _ => continue,
+            };
+            let a: Vec<&str> = del.iter().map(String::as_str).collect();
+            if quiet("iptables", &a) {
+                info!("raw: removed {tag}, left behind by a run that is gone");
+            }
+        }
+    }
+    let Some(listing) = text("nft", &["list", "tables", "inet"]) else {
+        return;
+    };
+    for name in listing
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(2))
+        .filter(|n| n.starts_with("rakhsh_"))
+    {
+        let Some(pid) = name.rsplit('_').next() else {
+            continue;
+        };
+        if running(pid) {
+            continue;
+        }
+        if quiet("nft", &["delete", "table", "inet", name]) {
+            info!("raw: removed nft table {name}, left behind by a run that is gone");
+        }
+    }
+}
+
 fn install(table: &str, iptables_rules: &[Vec<String>], nft_chains: &str) {
+    static SWEPT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    SWEPT.get_or_init(sweep_stale);
     let mut added = Vec::new();
     for r in iptables_rules {
         let a: Vec<&str> = r.iter().map(String::as_str).collect();
@@ -759,31 +882,35 @@ fn install(table: &str, iptables_rules: &[Vec<String>], nft_chains: &str) {
     );
 }
 
-fn install_rst_drop(sport: u16) {
-    let tag = format!("rakhsh-faketcp-{sport}");
-    let rule: Vec<String> = [
-        "-I",
+fn rst_rule(sport: &str, tag: &str, verb: &str) -> Vec<String> {
+    [
+        verb,
         "OUTPUT",
         "-p",
         "tcp",
         "--sport",
-        &sport.to_string(),
+        sport,
         "--tcp-flags",
         "RST",
         "RST",
         "-m",
         "comment",
         "--comment",
-        &tag,
+        tag,
         "-j",
         "DROP",
     ]
     .iter()
     .map(|s| s.to_string())
-    .collect();
+    .collect()
+}
+
+fn install_rst_drop(sport: u16) {
+    let me = std::process::id();
+    let tag = format!("rakhsh-faketcp-{sport}-{me}");
     install(
-        &format!("rakhsh_rst_{sport}"),
-        &[rule],
+        &format!("rakhsh_rst_{sport}_{me}"),
+        &[rst_rule(&sport.to_string(), &tag, "-I")],
         &format!(
             "chain out {{ type filter hook output priority 0; policy accept; \
              tcp sport {sport} tcp flags & rst == rst drop; }}"
@@ -791,34 +918,38 @@ fn install_rst_drop(sport: u16) {
     );
 }
 
+fn notrack_rule(chain: &str, dir: &str, port: &str, tag: &str, verb: &str) -> Vec<String> {
+    [
+        "-t",
+        "raw",
+        verb,
+        chain,
+        "-p",
+        "tcp",
+        dir,
+        port,
+        "-m",
+        "comment",
+        "--comment",
+        tag,
+        "-j",
+        "NOTRACK",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
 fn install_notrack(port: u16) {
-    let tag = format!("rakhsh-l2-{port}");
+    let me = std::process::id();
+    let tag = format!("rakhsh-l2-{port}-{me}");
+    let port = port.to_string();
     let rules: Vec<Vec<String>> = [("PREROUTING", "--dport"), ("OUTPUT", "--sport")]
         .iter()
-        .map(|(chain, dir)| {
-            [
-                "-t",
-                "raw",
-                "-I",
-                chain,
-                "-p",
-                "tcp",
-                dir,
-                &port.to_string(),
-                "-m",
-                "comment",
-                "--comment",
-                &tag,
-                "-j",
-                "NOTRACK",
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-        })
+        .map(|(chain, dir)| notrack_rule(chain, dir, &port, &tag, "-I"))
         .collect();
     install(
-        &format!("rakhsh_notrack_{port}"),
+        &format!("rakhsh_notrack_{port}_{me}"),
         &rules,
         &format!(
             "chain pre {{ type filter hook prerouting priority -300; policy accept; \
@@ -1110,9 +1241,13 @@ impl FrameRx for QuinnRx {
     }
 }
 
-async fn quic_over_raw(link: Arc<dyn RawLink>, initiator: bool) -> Result<(BoxTx, BoxRx)> {
+async fn quic_over_raw(
+    link: Arc<dyn RawLink>,
+    initiator: bool,
+    tuning: RawTuning,
+) -> Result<(BoxTx, BoxRx)> {
     let (consumer, bridge_addr) = bridge(link).await?;
-    let (scfg, ccfg) = crate::carrier::raw_quic_configs()?;
+    let (scfg, ccfg) = crate::carrier::raw_quic_configs(tuning)?;
     let rt = Arc::new(quinn::TokioRuntime);
     let (send, recv, ep, conn) = if initiator {
         let mut ep = quinn::Endpoint::new(quinn::EndpointConfig::default(), None, consumer, rt)?;
@@ -1176,6 +1311,8 @@ pub struct Dial<'a> {
     pub spoof: &'a SpoofOpts,
     pub fec: Option<(usize, usize)>,
     pub reliability: &'a str,
+    pub header: TcpHeader,
+    pub tuning: RawTuning,
 }
 
 pub async fn connect(
@@ -1190,6 +1327,8 @@ pub async fn connect(
         spoof,
         fec,
         reliability,
+        header,
+        tuning,
     } = d;
     let lp = p.lane(lane);
     let (sport, dport) = if initiator {
@@ -1214,6 +1353,8 @@ pub async fn connect(
                 sport,
                 dport,
                 seq: AtomicU32::new(1),
+                header,
+                ts: AtomicU32::new(1),
             };
             install_rst_drop(sport);
             Arc::new(link)
@@ -1270,7 +1411,7 @@ pub async fn connect(
         _ => link,
     };
     match reliability {
-        "quic" => quic_over_raw(link, initiator).await,
+        "quic" => quic_over_raw(link, initiator, tuning).await,
         _ => kcp_over_raw(link, lp.conv).await,
     }
 }
@@ -1492,7 +1633,6 @@ struct L2Link {
 
 const ETH_HDR: usize = 14;
 const IP4_HDR: usize = 20;
-const L2_OPTS: usize = 20;
 
 struct L2Craft {
     src_mac: [u8; 6],
@@ -1525,7 +1665,7 @@ impl L2Link {
 
 fn craft_l2_frame(c: &L2Craft, payload: &[u8], frame: &mut Vec<u8>) {
     frame.clear();
-    frame.reserve(ETH_HDR + IP4_HDR + 20 + L2_OPTS + payload.len());
+    frame.reserve(ETH_HDR + IP4_HDR + 20 + TCP_OPTS + payload.len());
     frame.extend_from_slice(&c.gw_mac);
     frame.extend_from_slice(&c.src_mac);
     frame.extend_from_slice(&[0x08, 0x00]);
@@ -1542,19 +1682,12 @@ fn craft_l2_frame(c: &L2Craft, payload: &[u8], frame: &mut Vec<u8>) {
     frame.extend_from_slice(&c.dport.to_be_bytes());
     frame.extend_from_slice(&c.seq.to_be_bytes());
     frame.extend_from_slice(&0u32.to_be_bytes());
-    frame.push((((20 + L2_OPTS) / 4) << 4) as u8);
+    frame.push((((20 + TCP_OPTS) / 4) << 4) as u8);
     frame.push(0b0001_1000);
     frame.extend_from_slice(&65535u16.to_be_bytes());
     frame.extend_from_slice(&[0, 0]);
     frame.extend_from_slice(&[0, 0]);
-    frame.extend_from_slice(&[2, 4, 0x05, 0xb4]);
-    frame.push(1);
-    frame.extend_from_slice(&[3, 3, 7]);
-    frame.push(1);
-    frame.push(1);
-    frame.extend_from_slice(&[8, 10]);
-    frame.extend_from_slice(&c.tsval.to_be_bytes());
-    frame.extend_from_slice(&0u32.to_be_bytes());
+    push_tcp_options(frame, c.tsval);
     frame.extend_from_slice(payload);
 
     let ip = ETH_HDR;

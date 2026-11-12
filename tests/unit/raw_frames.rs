@@ -44,7 +44,7 @@ fn l2_frame_layout_and_checksums() {
     );
     assert_eq!(
         f[tcp + 12] >> 4,
-        ((20 + L2_OPTS) / 4) as u8,
+        ((20 + TCP_OPTS) / 4) as u8,
         "data offset covers the options"
     );
     assert_eq!(f[tcp + 13], 0b0001_1000, "PSH|ACK: looks mid-stream");
@@ -55,7 +55,7 @@ fn l2_frame_layout_and_checksums() {
         "TCP checksum over the pseudo-header"
     );
     assert_eq!(
-        &f[tcp + 20 + L2_OPTS..],
+        &f[tcp + 20 + TCP_OPTS..],
         payload,
         "payload carried verbatim"
     );
@@ -72,27 +72,77 @@ fn l2_frame_is_identical_in_a_recycled_buffer() {
     assert_eq!(fresh, reused);
 }
 
+fn segment(seq: u32, ts: Option<u32>) -> TcpCraft {
+    TcpCraft {
+        src_ip: Ipv4Addr::new(10, 0, 0, 1),
+        peer: Ipv4Addr::new(10, 0, 0, 2),
+        sport: 20001,
+        dport: 30002,
+        seq,
+        ts,
+    }
+}
+
 #[test]
 fn tcp_segment_layout_and_checksum() {
-    let (src, peer) = (Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2));
+    let c = segment(42, None);
     let payload = b"rakhsh-faketcp";
     let mut seg = Vec::new();
-    craft_tcp_segment(src, peer, 20001, 30002, 42, payload, &mut seg);
+    craft_tcp_segment(&c, payload, &mut seg);
     assert_eq!(u16::from_be_bytes([seg[0], seg[1]]), 20001);
     assert_eq!(u16::from_be_bytes([seg[2], seg[3]]), 30002);
-    assert_eq!(seg[12] >> 4, 5, "no options on the raw-socket variant");
+    assert_eq!(seg[12] >> 4, 5, "the bare header carries no options");
     assert_eq!(seg[13], 0b0001_1000);
     assert_eq!(
-        checksum(&seg, pseudo_sum(src, peer, 6, seg.len())),
+        checksum(&seg, pseudo_sum(c.src_ip, c.peer, 6, seg.len())),
         0,
         "TCP checksum"
     );
     assert_eq!(&seg[20..], payload);
-    craft_tcp_segment(src, peer, 20001, 30002, 43, b"x", &mut seg);
+    craft_tcp_segment(&segment(43, None), b"x", &mut seg);
     assert_eq!(
         seg.len(),
         21,
         "the recycled buffer holds one segment, not two"
+    );
+}
+
+#[test]
+fn tcp_segment_with_linux_options() {
+    let c = segment(42, Some(7));
+    let payload = b"rakhsh-faketcp";
+    let mut seg = Vec::new();
+    craft_tcp_segment(&c, payload, &mut seg);
+    let head = 20 + TCP_OPTS;
+    assert_eq!(
+        seg[12] >> 4,
+        (head / 4) as u8,
+        "data offset covers the options"
+    );
+    assert_eq!(&seg[20..24], &[2, 4, 0x05, 0xb4], "MSS 1460");
+    assert_eq!(&seg[25..28], &[3, 3, 7], "window scale 7");
+    assert_eq!(&seg[30..32], &[8, 10], "timestamp option");
+    assert_eq!(u32::from_be_bytes([seg[32], seg[33], seg[34], seg[35]]), 7);
+    assert_eq!(
+        checksum(&seg, pseudo_sum(c.src_ip, c.peer, 6, seg.len())),
+        0,
+        "TCP checksum covers the options"
+    );
+    assert_eq!(&seg[head..], payload, "payload after the options");
+}
+
+#[test]
+fn faketcp_and_l2tcp_send_the_same_options() {
+    let mut seg = Vec::new();
+    craft_tcp_segment(&segment(1, Some(9)), b"", &mut seg);
+    let mut l2 = craft();
+    l2.tsval = 9;
+    let mut frame = Vec::new();
+    craft_l2_frame(&l2, b"", &mut frame);
+    let tcp = ETH_HDR + IP4_HDR;
+    assert_eq!(
+        &seg[20..20 + TCP_OPTS],
+        &frame[tcp + 20..tcp + 20 + TCP_OPTS]
     );
 }
 

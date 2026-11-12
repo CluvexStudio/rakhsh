@@ -239,14 +239,17 @@ async fn issue(cfg: &Acme) -> Result<Arc<CertifiedKey>> {
         .context("asking the certificate authority for an order")?;
 
     let answers: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
-    let listener = TcpListener::bind(("0.0.0.0", cfg.port))
-        .await
-        .with_context(|| {
-            format!(
-                "binding port {} for the http-01 challenge — it must be free and reachable from the internet",
-                cfg.port
-            )
-        })?;
+    let listener = match TcpListener::bind((std::net::Ipv6Addr::UNSPECIFIED, cfg.port)).await {
+        Ok(l) => l,
+        Err(_) => TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, cfg.port))
+            .await
+            .with_context(|| {
+                format!(
+                    "binding port {} for the http-01 challenge — it must be free and reachable from the internet",
+                    cfg.port
+                )
+            })?,
+    };
     let server = tokio::spawn(serve(listener, answers.clone()));
 
     let outcome = run_order(&mut order, &answers).await;

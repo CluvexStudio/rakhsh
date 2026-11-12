@@ -152,3 +152,37 @@ async fn a_fragmented_client_hello_still_completes_the_handshake() {
         .expect("a fragmented handshake must not hang");
     server.await.unwrap();
 }
+
+#[test]
+fn faketcp_header_stays_bare_unless_asked() {
+    assert_eq!(TcpHeader::parse(None).unwrap(), TcpHeader::Bare);
+    assert_eq!(TcpHeader::parse(Some("bare")).unwrap(), TcpHeader::Bare);
+    assert_eq!(TcpHeader::parse(Some("linux")).unwrap(), TcpHeader::Linux);
+    assert!(TcpHeader::parse(Some("windows")).is_err());
+}
+
+#[test]
+fn raw_tuning_keeps_the_old_defaults_and_checks_its_range() {
+    let cfg = |extra: &str| {
+        toml::from_str::<crate::config::Config>(&format!(
+            "role = \"entry\"\ncarrier = \"faketcp\"\n{extra}"
+        ))
+        .unwrap()
+    };
+    let t = RawTuning::from_cfg(&cfg("")).unwrap();
+    assert_eq!((t.window, t.bbr, t.lanes), (1 << 20, false, 1));
+    let t = RawTuning::from_cfg(&cfg(
+        "raw_window_mb = 16\nraw_congestion = \"bbr\"\nraw_lanes = 4\n",
+    ))
+    .unwrap();
+    assert_eq!((t.window, t.bbr, t.lanes), (16 << 20, true, 4));
+    for bad in [
+        "raw_window_mb = 0\n",
+        "raw_window_mb = 65\n",
+        "raw_lanes = 0\n",
+        "raw_lanes = 9\n",
+        "raw_congestion = \"reno\"\n",
+    ] {
+        assert!(RawTuning::from_cfg(&cfg(bad)).is_err(), "{bad}");
+    }
+}

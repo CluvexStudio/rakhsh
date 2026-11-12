@@ -17,6 +17,10 @@ const UNSUPPORTED: &str =
      stream carrier such as quic, wss or tls";
 
 #[derive(Clone, Copy)]
+#[cfg_attr(
+    not(all(target_os = "windows", feature = "windivert")),
+    allow(dead_code)
+)]
 pub struct RawParams {
     key: [u8; 32],
 }
@@ -28,7 +32,10 @@ impl RawParams {
         }
     }
 
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    #[cfg_attr(
+        not(all(target_os = "windows", feature = "windivert")),
+        allow(dead_code)
+    )]
     pub(crate) fn lane_ports(&self, lane: u64) -> (u16, u16) {
         let mut h = blake3::Hasher::new_keyed(&self.key);
         h.update(&lane.to_be_bytes());
@@ -43,6 +50,7 @@ impl RawParams {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct SpoofOpts {
     pub pool: Vec<Ipv4Addr>,
     pub sockbuf: Option<usize>,
@@ -53,12 +61,15 @@ pub struct SpoofOpts {
     pub link_encrypt: bool,
 }
 
+#[allow(dead_code)]
 pub struct Dial<'a> {
     pub kind: &'a str,
     pub params: &'a RawParams,
     pub spoof: &'a SpoofOpts,
     pub fec: Option<(usize, usize)>,
     pub reliability: &'a str,
+    pub header: crate::carrier::TcpHeader,
+    pub tuning: crate::carrier::RawTuning,
 }
 
 pub async fn connect(

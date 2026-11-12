@@ -156,14 +156,25 @@ of looking configured.
 
 | | |
 |---|---|
-| [CORE.md](CORE.md) | inbounds, outbounds and the router |
-| [LINKS.md](LINKS.md) | several ways to reach a peer, and how one is chosen |
-| [SHABDIZ.md](SHABDIZ.md) | the datagram carrier, for paths that refuse everything else |
-| [RESUME.md](RESUME.md) | keeping streams alive across a lane's death |
-| [DNS.md](DNS.md) | the resolver and split routing |
-| [LIMITS.md](LIMITS.md) | quotas and rate limits |
-| [CONTROL.md](CONTROL.md) | watching and managing a fleet from one host |
-| [SECURITY.md](SECURITY.md) | the threat model, and what is actually protected |
+| [CORE.md](https://cluvexstudio.dev/rakhsh/docs/guide/overview/) | inbounds, outbounds and the router |
+| [LINKS.md](https://cluvexstudio.dev/rakhsh/docs/guide/links/) | several ways to reach a peer, and how one is chosen |
+| [SHABDIZ.md](https://cluvexstudio.dev/rakhsh/docs/guide/datagram/) | the datagram carrier, for paths that refuse everything else |
+| [RESUME.md](https://cluvexstudio.dev/rakhsh/docs/guide/resume/) | keeping streams alive across a lane's death |
+| [DNS.md](https://cluvexstudio.dev/rakhsh/docs/guide/dns/) | the resolver and split routing |
+| [LIMITS.md](https://cluvexstudio.dev/rakhsh/docs/guide/limits/) | quotas and rate limits |
+| [CONTROL.md](https://cluvexstudio.dev/rakhsh/docs/guide/control/) | watching and managing a fleet from one host |
+| [SECURITY.md](https://cluvexstudio.dev/rakhsh/docs/guide/security/) | the threat model, and what is actually protected |
+
+## Donate
+
+If rakhsh is useful to you, a donation keeps the work going and pays for the servers the
+measurements run on. Send only the asset for its network.
+
+| Network | Send | Address |
+|---|---|---|
+| Tron (TRC-20) | TRX / USDT | `TRxVSHcoADZnBfztFmFb2TQopusAwWYEVR` |
+| BNB Smart Chain (BEP-20) | USDT | `0x20c980AEF36Aa71D0A0e7bE382AeD20b73bC6D27` |
+| TON | TON | `UQAH75bXaaRUhZMwiF0ZujOXFDDmvLSPASKoOsWF0HNasiaM` |
 
 ## License
 
