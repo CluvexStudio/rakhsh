@@ -70,11 +70,22 @@ the rest.
 Every release carries a static musl binary for x86-64, aarch64, armv7, armv6, i686, riscv64,
 loongarch64 and ppc64le, each next to a checksum the installer verifies before it installs
 anything. The same release has Windows builds for x64, x86 and ARM64, and macOS builds for Intel
-and Apple Silicon. Everything works there except the raw-packet carriers, which need Linux, with one
-exception: faketcp on Windows, through a packet driver you install yourself. Install Npcap
-(https://npcap.com), or put WinDivert.dll and WinDivert64.sys next to rakhsh.exe (the
-`rakhsh-windivert` zip has them), then run rakhsh as Administrator. Windows Defender may flag
-WinDivert because it can capture packets; allow it if you want to use it.
+and Apple Silicon. Everything works there except the raw-packet carriers, which need Linux. The
+exception is faketcp:
+
+- On macOS it needs nothing extra. Run rakhsh with sudo and it uses the system's own BPF and pf.
+- On Windows it goes through a packet driver you install yourself. Install Npcap
+  (https://npcap.com), or put WinDivert.dll and WinDivert64.sys next to rakhsh.exe (the
+  `rakhsh-windivert` zip has them), then run rakhsh as Administrator. Windows Defender may flag
+  WinDivert because it can capture packets; allow it if you want to use it.
+
+The macOS builds are not notarized by Apple. Make the download executable, and if you saved it with
+a browser, clear the quarantine flag once:
+
+```
+chmod +x rakhsh-aarch64-apple-darwin
+xattr -d com.apple.quarantine rakhsh-aarch64-apple-darwin
+```
 
 To build it yourself, clone shabdiz next to it:
 

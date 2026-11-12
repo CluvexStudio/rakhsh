@@ -12,13 +12,18 @@ const UNSUPPORTED: &str =
     "on Windows the only raw-packet carrier is faketcp, through Npcap or WinDivert; l2tcp, icmp \
      and spoof need Linux, so use faketcp or a stream carrier such as quic, wss or tls";
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+const UNSUPPORTED: &str =
+    "on macOS the only raw-packet carrier is faketcp, run with sudo; l2tcp, icmp and spoof need \
+     Linux, so use faketcp or a stream carrier such as quic, wss or tls";
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 const UNSUPPORTED: &str =
     "raw-packet carriers (faketcp, l2tcp, icmp, spoof) need Linux; on this platform use a \
      stream carrier such as quic, wss or tls";
 
 #[derive(Clone, Copy)]
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
 pub struct RawParams {
     key: [u8; 32],
 }
@@ -30,7 +35,7 @@ impl RawParams {
         }
     }
 
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
     pub(crate) fn lane_ports(&self, lane: u64) -> (u16, u16) {
         let mut h = blake3::Hasher::new_keyed(&self.key);
         h.update(&lane.to_be_bytes());
@@ -76,6 +81,10 @@ pub async fn connect(
     #[cfg(target_os = "windows")]
     if d.kind == "faketcp" {
         return crate::win_raw::connect_faketcp(d.params, peer, initiator, lane);
+    }
+    #[cfg(target_os = "macos")]
+    if d.kind == "faketcp" {
+        return crate::mac_raw::connect_faketcp(d.params, peer, initiator, lane);
     }
     let _ = (&d, initiator, peer, lane);
     bail!(UNSUPPORTED)

@@ -111,6 +111,13 @@ jobs:
         working-directory: rakhsh
         run: cargo test --workspace
 
+      - name: faketcp over loopback, as root
+        if: runner.os == 'macOS'
+        working-directory: rakhsh
+        run: |
+          bin=$(cargo test -p rakhsh --lib --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .profile.test and .target.kind == ["lib"]) | .executable')
+          sudo "$bin" mac_raw::tests::faketcp_over_loopback --ignored --exact --nocapture
+
   panel:
     runs-on: ubuntu-latest
     steps:

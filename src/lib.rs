@@ -3,6 +3,8 @@ mod acme;
 mod carrier;
 pub mod cli;
 mod config;
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
+mod craft;
 mod dgram;
 mod dns;
 mod doctor;
@@ -13,6 +15,8 @@ mod fleet;
 mod l3;
 mod limits;
 mod links;
+#[cfg(target_os = "macos")]
+mod mac_raw;
 mod noise;
 mod openvpn;
 mod proxy;
