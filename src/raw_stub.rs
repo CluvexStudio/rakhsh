@@ -7,20 +7,18 @@ use crate::carrier::{BoxRx, BoxTx};
 
 pub const RAW_LANES: u64 = 1;
 
-#[cfg(all(target_os = "windows", not(feature = "windivert")))]
-const NO_WINDIVERT: &str =
-    "faketcp on Windows needs the WinDivert driver, which this binary was built without; \
-     rebuild with `--features windivert` or use a stream carrier such as quic, wss or tls";
+#[cfg(target_os = "windows")]
+const UNSUPPORTED: &str =
+    "on Windows the only raw-packet carrier is faketcp, through Npcap or WinDivert; l2tcp, icmp \
+     and spoof need Linux, so use faketcp or a stream carrier such as quic, wss or tls";
 
+#[cfg(not(target_os = "windows"))]
 const UNSUPPORTED: &str =
     "raw-packet carriers (faketcp, l2tcp, icmp, spoof) need Linux; on this platform use a \
      stream carrier such as quic, wss or tls";
 
 #[derive(Clone, Copy)]
-#[cfg_attr(
-    not(all(target_os = "windows", feature = "windivert")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub struct RawParams {
     key: [u8; 32],
 }
@@ -32,10 +30,7 @@ impl RawParams {
         }
     }
 
-    #[cfg_attr(
-        not(all(target_os = "windows", feature = "windivert")),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) fn lane_ports(&self, lane: u64) -> (u16, u16) {
         let mut h = blake3::Hasher::new_keyed(&self.key);
         h.update(&lane.to_be_bytes());
@@ -78,13 +73,9 @@ pub async fn connect(
     peer: Option<Ipv4Addr>,
     lane: u64,
 ) -> Result<(BoxTx, BoxRx)> {
-    #[cfg(all(target_os = "windows", feature = "windivert"))]
+    #[cfg(target_os = "windows")]
     if d.kind == "faketcp" {
-        return crate::windivert_tcp::connect_faketcp(d.params, peer, initiator, lane);
-    }
-    #[cfg(all(target_os = "windows", not(feature = "windivert")))]
-    if d.kind == "faketcp" {
-        bail!(NO_WINDIVERT)
+        return crate::win_raw::connect_faketcp(d.params, peer, initiator, lane);
     }
     let _ = (&d, initiator, peer, lane);
     bail!(UNSUPPORTED)

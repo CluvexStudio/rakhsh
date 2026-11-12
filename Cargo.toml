@@ -11,7 +11,6 @@ repository = "https://github.com/CluvexStudio/rakhsh"
 default = ["mimalloc", "acme"]
 mimalloc = ["dep:mimalloc"]
 acme = ["dep:instant-acme", "dep:x509-parser"]
-windivert = ["dep:windivert", "dep:windows"]
 
 [[bin]]
 name = "rakhsh"
@@ -61,15 +60,10 @@ rama = { git = "https://github.com/plabayo/rama", rev = "ec92b76", default-featu
 sysinfo = { version = "=0.40.1", default-features = false, features = ["system"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Raw-packet carriers on Windows need a driver: the kernel blocks crafted TCP
-# from user space. WinDivert is that driver. `cargo build --features windivert`
-# links the official WinDivert.dll, so set WINDIVERT_PATH to the x64 (or x86)
-# folder of the WinDivert release, and ship WinDivert.dll and WinDivert64.sys
-# next to rakhsh.exe. Its "static" build is not used: the vendored C defines a
-# global memcpy that calls itself in an MSVC-linked binary.
-windivert = { version = "=0.6.0", optional = true }
-windows = { version = "0.48", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper"], optional = true }
-
+# faketcp on Windows loads a packet driver at run time: WinDivert.dll next to
+# rakhsh.exe, or Npcap from System32\Npcap. Nothing is linked at build time, so
+# the same binary runs with either driver, or with none for the other carriers.
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_System_LibraryLoader", "Win32_System_SystemInformation"] }
 
 [profile.release]
 opt-level = 3

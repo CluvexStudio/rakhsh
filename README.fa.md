@@ -89,9 +89,10 @@ bash <(curl -fsSL .../install.sh) --join rakhsh://…
 loongarch64 و ppc64le دارد، هر کدام کنارِ یک چک‌سام که نصاب پیش از نصبِ هر چیزی بررسی‌اش
 می‌کند. نسخه‌ی ویندوز برای x64، x86 و ARM64 و نسخه‌ی مک برای اینتل و Apple Silicon هم در همان
 ریلیز هست. آنجا همه‌چیز کار می‌کند جز حامل‌های بسته‌ی خام، که لینوکس می‌خواهند؛ فقط faketcp
-روی ویندوز هم هست. برایش zipِ `rakhsh-windivert` را بگیر که یک بیلد با faketcp را کنارِ درایورِ
-WinDivert دارد. فایل‌ها را کنار هم نگه دار و با Administrator اجرا کن. ممکن است Windows Defender
-به WinDivert گیر بدهد چون بسته‌ها را می‌گیرد؛ اگر faketcp می‌خواهی اجازه‌اش را بده.
+روی ویندوز هم کار می‌کند، با یک درایورِ بسته که خودت نصب می‌کنی. Npcap را از https://npcap.com
+نصب کن، یا WinDivert.dll و WinDivert64.sys را کنارِ rakhsh.exe بگذار (zipِ `rakhsh-windivert`
+همین‌ها را دارد)، بعد رخش را با Administrator اجرا کن. ممکن است Windows Defender به WinDivert
+گیر بدهد چون بسته‌ها را می‌گیرد؛ اگر می‌خواهی ازش استفاده کنی اجازه‌اش را بده.
 
 برای بیلدِ خودت، شبدیز را کنارش کلون کن:
 
@@ -125,7 +126,7 @@ rakhsh init --tunnel-addr <public-address>:7000 --carrier wss --proxy 127.0.0.1:
 ```
 rakhsh check -c /etc/rakhsh.toml     # کانفیگ را به زبان ساده برایت می‌خواند
 rakhsh install -c /etc/rakhsh.toml   # به‌صورت سرویس اجرایش می‌کند
-rakhsh status                        # لِین‌ها، سرعت، افت، پردازنده — زنده
+rakhsh status                        # لِین‌ها، سرعت، افت، پردازنده، زنده
 ```
 
 <div dir="rtl">

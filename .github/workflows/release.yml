@@ -108,8 +108,9 @@ jobs:
           path: rakhsh/dist/*
           if-no-files-found: error
 
-  # Windows and macOS get the client and the stream carriers; the raw-packet
-  # carriers are Linux-only and are gated out at compile time.
+  # Windows and macOS get every carrier except the Linux-only raw ones. On
+  # Windows faketcp loads Npcap or WinDivert at run time, and the windivert zip
+  # puts the official signed WinDivert files next to the same rakhsh.exe.
   desktop:
     name: ${{ matrix.os }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -117,8 +118,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows, arch: x86_64, runner: windows-latest, target: x86_64-pc-windows-msvc }
-          - { os: windows, arch: i686, runner: windows-latest, target: i686-pc-windows-msvc }
+          - { os: windows, arch: x86_64, runner: windows-latest, target: x86_64-pc-windows-msvc, wd: x64 }
+          - { os: windows, arch: i686, runner: windows-latest, target: i686-pc-windows-msvc, wd: x86 }
           - { os: windows, arch: aarch64, runner: windows-latest, target: aarch64-pc-windows-msvc }
           - { os: macos, arch: x86_64, runner: macos-latest, target: x86_64-apple-darwin }
           - { os: macos, arch: aarch64, runner: macos-latest, target: aarch64-apple-darwin }
@@ -169,45 +170,8 @@ jobs:
             ls -l "dist/$name"
           done
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.target }}
-          path: rakhsh/dist/*
-          if-no-files-found: error
-
-  # faketcp on Windows goes through the WinDivert driver. Windows only loads a
-  # signed driver, so the package carries the official WinDivert files next to
-  # a rakhsh.exe built with --features windivert.
-  windivert:
-    name: windows ${{ matrix.arch }} windivert
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: x86_64, target: x86_64-pc-windows-msvc, dir: x64 }
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          path: rakhsh
-
-      - uses: actions/checkout@v5
-        with:
-          repository: CluvexStudio/shabdiz
-          path: shabdiz
-          ssh-key: ${{ secrets.SHABDIZ_SSH_KEY }}
-          token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rakhsh
-          key: windivert-${{ matrix.target }}
-
       - name: Fetch WinDivert
+        if: matrix.wd
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -217,52 +181,49 @@ jobs:
           $sum = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           if ($sum -ne $env:WINDIVERT_SHA256) { throw "WinDivert zip is $sum, expected $env:WINDIVERT_SHA256" }
           Expand-Archive $zip -DestinationPath $out
-          $dll = Get-ChildItem $out -Recurse -Filter WinDivert.dll | Where-Object { $_.Directory.Name -eq '${{ matrix.dir }}' } | Select-Object -First 1
-          if (-not $dll) { throw 'no WinDivert.dll for ${{ matrix.dir }} in the release' }
+          $dll = Get-ChildItem $out -Recurse -Filter WinDivert.dll | Where-Object { $_.Directory.Name -eq '${{ matrix.wd }}' } | Select-Object -First 1
+          if (-not $dll) { throw 'no WinDivert.dll for ${{ matrix.wd }} in the release' }
           foreach ($f in Get-ChildItem $dll.Directory.FullName -Filter *.sys) {
             $sig = Get-AuthenticodeSignature $f.FullName
             "$($f.Name): $($sig.Status), $($sig.SignerCertificate.Subject)"
             if ($sig.Status -in 'NotSigned', 'HashMismatch') { throw "$($f.Name) failed its signature check" }
           }
-          "WINDIVERT_PATH=$($dll.Directory.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "WINDIVERT_DIR=$($dll.Directory.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "WINDIVERT_ROOT=$($dll.Directory.Parent.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
         env:
           WINDIVERT_VERSION: 2.2.2
           WINDIVERT_SHA256: 63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15
 
-      - name: Build
-        working-directory: rakhsh
-        run: cargo build --release --target ${{ matrix.target }} -p rakhsh --features windivert
-
-      - name: Package
+      - name: Package with WinDivert
+        if: matrix.wd
         working-directory: rakhsh
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $exe = 'target\${{ matrix.target }}\release\rakhsh.exe'
+          & $exe --help > $null
+          if ($LASTEXITCODE -ne 0) { throw "rakhsh.exe exited with $LASTEXITCODE" }
           $name = 'rakhsh-windivert-${{ matrix.target }}'
           $pkg = Join-Path $env:RUNNER_TEMP $name
-          New-Item -ItemType Directory -Force $pkg, dist | Out-Null
-          Copy-Item 'target\${{ matrix.target }}\release\rakhsh.exe' $pkg
-          Copy-Item (Join-Path $env:WINDIVERT_PATH 'WinDivert.dll'), (Join-Path $env:WINDIVERT_PATH 'WinDivert*.sys') $pkg
+          New-Item -ItemType Directory -Force $pkg | Out-Null
+          Copy-Item $exe $pkg
+          Copy-Item (Join-Path $env:WINDIVERT_DIR 'WinDivert.dll'), (Join-Path $env:WINDIVERT_DIR 'WinDivert*.sys') $pkg
           $license = Get-ChildItem $env:WINDIVERT_ROOT -Filter 'LICENSE*' | Select-Object -First 1
           if (-not $license) { throw 'no LICENSE in the WinDivert release' }
           Copy-Item $license.FullName (Join-Path $pkg 'WinDivert-LICENSE.txt')
-          & (Join-Path $pkg 'rakhsh.exe') --help > $null
-          if ($LASTEXITCODE -ne 0) { throw "rakhsh.exe --help exited with $LASTEXITCODE" }
           Get-ChildItem $pkg
           Compress-Archive -Path $pkg -DestinationPath "dist\$name.zip"
           $sum = (Get-FileHash "dist\$name.zip" -Algorithm SHA256).Hash.ToLower()
           [IO.File]::WriteAllText((Join-Path (Resolve-Path dist) "$name.zip.sha256"), "$sum  $name.zip`n")
-          Get-ChildItem dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windivert-${{ matrix.target }}
+          name: ${{ matrix.target }}
           path: rakhsh/dist/*
           if-no-files-found: error
 
   publish:
-    needs: [linux, desktop, windivert]
+    needs: [linux, desktop]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
