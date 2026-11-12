@@ -108,23 +108,19 @@ jobs:
           path: rakhsh/dist/*
           if-no-files-found: error
 
-  # Windows and macOS get every carrier except the Linux-only raw ones. On
-  # Windows faketcp loads Npcap or WinDivert at run time, and the windivert zip
-  # puts the official signed WinDivert files next to the same rakhsh.exe.
-  desktop:
-    name: ${{ matrix.os }} ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
+  # Windows gets every carrier except the Linux-only raw ones, and faketcp
+  # loads Npcap or WinDivert at run time. The windivert zip puts the official
+  # signed WinDivert files next to the same rakhsh.exe.
+  windows:
+    name: windows ${{ matrix.arch }}
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: windows, arch: x86_64, runner: windows-latest, target: x86_64-pc-windows-msvc, wd: x64 }
-          - { os: windows, arch: i686, runner: windows-latest, target: i686-pc-windows-msvc, wd: x86 }
-          - { os: windows, arch: aarch64, runner: windows-latest, target: aarch64-pc-windows-msvc }
-          # GitHub's arm64 macOS pool often has no free runner; the Intel one
-          # builds both targets, since Xcode targets Apple Silicon from either.
-          - { os: macos, arch: x86_64, runner: macos-15-intel, target: x86_64-apple-darwin }
-          - { os: macos, arch: aarch64, runner: macos-15-intel, target: aarch64-apple-darwin }
+          - { arch: x86_64, target: x86_64-pc-windows-msvc, wd: x64 }
+          - { arch: i686, target: i686-pc-windows-msvc, wd: x86 }
+          - { arch: aarch64, target: aarch64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v5
         with:
@@ -144,7 +140,7 @@ jobs:
       # ring and aws-lc compile their ARM64 Windows code with clang, which
       # comes from the runner's LLVM.
       - name: Put clang on the path
-        if: matrix.target == 'aarch64-pc-windows-msvc'
+        if: matrix.arch == 'aarch64'
         shell: bash
         run: echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
 
@@ -162,12 +158,11 @@ jobs:
         shell: bash
         run: |
           set -eu
-          case "${{ matrix.os }}" in windows) ext=".exe" ;; *) ext="" ;; esac
           mkdir -p dist
           for bin in rakhsh rakhsh-control; do
-            name="$bin-${{ matrix.target }}$ext"
-            cp "target/${{ matrix.target }}/release/$bin$ext" "dist/$name"
-            if command -v sha256sum >/dev/null; then sum=$(sha256sum "dist/$name"); else sum=$(shasum -a 256 "dist/$name"); fi
+            name="$bin-${{ matrix.target }}.exe"
+            cp "target/${{ matrix.target }}/release/$bin.exe" "dist/$name"
+            sum=$(sha256sum "dist/$name")
             printf '%s  %s\n' "${sum%% *}" "$name" > "dist/$name.sha256"
             ls -l "dist/$name"
           done
@@ -224,8 +219,63 @@ jobs:
           path: rakhsh/dist/*
           if-no-files-found: error
 
+  # GitHub's arm64 macOS pool often has no free runner; the Intel one builds
+  # both targets, since Xcode targets Apple Silicon from either.
+  macos:
+    name: macos ${{ matrix.arch }}
+    runs-on: macos-15-intel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, target: x86_64-apple-darwin }
+          - { arch: aarch64, target: aarch64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: rakhsh
+
+      - uses: actions/checkout@v5
+        with:
+          repository: CluvexStudio/shabdiz
+          path: shabdiz
+          ssh-key: ${{ secrets.SHABDIZ_SSH_KEY }}
+          token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rakhsh
+          key: ${{ matrix.target }}
+
+      - name: Build
+        working-directory: rakhsh
+        run: cargo build --release --target ${{ matrix.target }} -p rakhsh -p rakhsh-control
+
+      - name: Name the assets
+        working-directory: rakhsh
+        run: |
+          set -eu
+          mkdir -p dist
+          for bin in rakhsh rakhsh-control; do
+            name="$bin-${{ matrix.target }}"
+            cp "target/${{ matrix.target }}/release/$bin" "dist/$name"
+            sum=$(shasum -a 256 "dist/$name")
+            printf '%s  %s\n' "${sum%% *}" "$name" > "dist/$name.sha256"
+            ls -l "dist/$name"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: rakhsh/dist/*
+          if-no-files-found: error
+
   publish:
-    needs: [linux, desktop]
+    needs: [linux, windows, macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
