@@ -18,8 +18,8 @@ env:
   ZIG_VERSION: 0.17.1
 
 jobs:
-  build:
-    name: ${{ matrix.arch }}
+  linux:
+    name: linux ${{ matrix.arch }}
     runs-on: ubuntu-latest
     continue-on-error: ${{ !matrix.required }}
     strategy:
@@ -108,8 +108,75 @@ jobs:
           path: rakhsh/dist/*
           if-no-files-found: error
 
+  # Windows and macOS get the client and the stream carriers; the raw-packet
+  # carriers are Linux-only and are gated out at compile time.
+  desktop:
+    name: ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows, arch: x86_64, runner: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows, arch: i686, runner: windows-latest, target: i686-pc-windows-msvc }
+          - { os: windows, arch: aarch64, runner: windows-latest, target: aarch64-pc-windows-msvc }
+          - { os: macos, arch: x86_64, runner: macos-latest, target: x86_64-apple-darwin }
+          - { os: macos, arch: aarch64, runner: macos-latest, target: aarch64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: rakhsh
+
+      - uses: actions/checkout@v5
+        with:
+          repository: CluvexStudio/shabdiz
+          path: shabdiz
+          ssh-key: ${{ secrets.SHABDIZ_SSH_KEY }}
+          token: ${{ secrets.SHABDIZ_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # ring and aws-lc compile their ARM64 Windows code with clang, which
+      # comes from the runner's LLVM.
+      - name: Put clang on the path
+        if: matrix.target == 'aarch64-pc-windows-msvc'
+        shell: bash
+        run: echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rakhsh
+          key: ${{ matrix.target }}
+
+      - name: Build
+        working-directory: rakhsh
+        run: cargo build --release --target ${{ matrix.target }} -p rakhsh -p rakhsh-control
+
+      - name: Name the assets
+        working-directory: rakhsh
+        shell: bash
+        run: |
+          set -eu
+          case "${{ matrix.os }}" in windows) ext=".exe" ;; *) ext="" ;; esac
+          mkdir -p dist
+          for bin in rakhsh rakhsh-control; do
+            name="$bin-${{ matrix.target }}$ext"
+            cp "target/${{ matrix.target }}/release/$bin$ext" "dist/$name"
+            if command -v sha256sum >/dev/null; then sum=$(sha256sum "dist/$name"); else sum=$(shasum -a 256 "dist/$name"); fi
+            printf '%s  %s\n' "${sum%% *}" "$name" > "dist/$name.sha256"
+            ls -l "dist/$name"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: rakhsh/dist/*
+          if-no-files-found: error
+
   publish:
-    needs: build
+    needs: [linux, desktop]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
