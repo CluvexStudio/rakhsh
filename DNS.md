@@ -4,8 +4,8 @@ A small caching DNS server whose upstream depends on the *name*. Behind a filter
 names, and for sites that give a better answer to a local resolver, that is exactly what plain DNS cannot do:
 
 - names the router sends **direct** (with `--split-iran`: `.ir` and the Iranian list) are asked of a **local** resolver
-  — fast, and the CDN node nearest the user;
-- names the router sends to the **tunnel** are asked of a resolver **abroad, through the tunnel** — nothing leaks to the
+fast, and the CDN node nearest the user;
+- names the router sends to the **tunnel** are asked of a resolver **abroad, through the tunnel**, nothing leaks to the
   local network and nothing can poison it;
 - names the router sends to **block** get NXDOMAIN.
 
@@ -41,17 +41,17 @@ Rules are tried in order, first match wins, like for connections. A rule that li
 rule that lists **address ranges** (the Iranian list) needs an address, so the name is asked of the local resolver
 first: if the answer lands in the listed ranges the local answer is used as it is, otherwise the question goes abroad.
 So an Iranian shop on a `.com` name still resolves locally, and a foreign name never leaves through a local resolver
-unless a rule says so. No rule matches → the `final` outbound.
+unless a rule says so. No rule matches -> the `final` outbound.
 
 ## Details
 
 - Queries are forwarded as raw packets (EDNS options, DNSSEC records and so on pass through); only the header, the
-  first question and answer TTLs are read. A truncated UDP answer is retried over TCP — through the tunnel for remote names.
-- The cache honours the smallest TTL of an answer, clamped to `cache_min_ttl`…`cache_max_ttl`; NXDOMAIN is kept 30 s;
+  first question and answer TTLs are read. A truncated UDP answer is retried over TCP, through the tunnel for remote names.
+- The cache honours the smallest TTL of an answer, clamped to `cache_min_ttl`...`cache_max_ttl`; NXDOMAIN is kept 30 s;
   SERVFAIL is never cached. A cached answer is returned as it was received (TTLs are not counted down).
 - Every upstream failing gives SERVFAIL; a malformed query gets FORMERR.
-- Listening on a non-loopback address without `allow` makes an open resolver, and rakhsh warns.
-- Don't point this host's own `/etc/resolv.conf` at rakhsh's DNS *and* list no `local` servers: the default `local`
+- Listening on a non-loopback address without `allow` makes an open resolver, and Rakhsh warns.
+- Don't point this host's own `/etc/resolv.conf` at Rakhsh's DNS *and* list no `local` servers: the default `local`
   list skips this server, but an empty list then has nothing to ask.
 
 ## Honest limits

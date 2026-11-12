@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <b>English</b> · <a href="README.fa.md">فارسی</a>
+  <b>English</b> &nbsp;|&nbsp; <a href="README.fa.md">فارسی</a>
 </p>
 
-# rakhsh
+# Rakhsh
 
 A network core written in Rust. It takes traffic from where it starts to where it should come
-out — directly on one machine, or tunnelled across as many servers as you have — and it is built
+out (directly on one machine, or tunnelled across as many servers as you have) and it is built
 to keep working on networks that are trying to stop it.
 
 One binary. What it becomes is decided by its config: a standalone node, the near end of a
@@ -30,7 +30,7 @@ tunnel, the far end, or a whole fleet of each.
 ## What it is
 
 **A router with a tunnel in it**, rather than a tunnel with a router bolted on. Traffic arrives at
-an inbound, the router decides what to do with it, and it leaves through an outbound — direct, or
+an inbound, the router decides what to do with it, and it leaves through an outbound, direct, or
 through the tunnel. The same decision engine runs whether or not a tunnel exists.
 
 **Many carriers, one protocol.** The handshake, the record layer and the multiplexer do not know
@@ -39,7 +39,7 @@ connection, TLS, a WebSocket, QUIC, an ARQ over UDP, or frames written straight 
 a network stops carrying one of them, you change one line.
 
 **Lanes, not a connection.** A tunnel is several independent lanes. Losing one costs the streams
-that were on it — and with `resume`, not even those: they move to another lane and carry on from
+that were on it, and with `resume`, not even those: they move to another lane and carry on from
 the last byte the far side acknowledged.
 
 **Identities, not addresses.** Every node has its own keypair, and each side lists the identities
@@ -51,14 +51,14 @@ key derived from the token, then AES-256-GCM on every record.
 
 ## Install
 
-One line on a bare server — it fetches the binaries, asks a handful of questions, writes the
+One line on a bare server, it fetches the binaries, asks a handful of questions, writes the
 config, installs the service, and hands you a link for the other end:
 
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/CluvexStudio/rakhsh/main/install.sh)
 ```
 
-On the second server there is nothing to answer at all — paste the line the first one printed:
+On the second server there is nothing to answer at all, paste the line the first one printed:
 
 ```
 bash <(curl -fsSL .../install.sh) --join rakhsh://…
@@ -69,9 +69,15 @@ the rest.
 
 Every release carries a static musl binary for x86-64, aarch64, armv7, armv6, i686, riscv64,
 loongarch64 and ppc64le, each next to a checksum the installer verifies before it installs
-anything. Or build it yourself:
+anything. The same release has Windows builds for x64, x86 and ARM64, and macOS builds for Intel
+and Apple Silicon. Everything works there except the raw-packet carriers, which need Linux.
+
+To build it yourself, clone shabdiz next to it:
 
 ```
+git clone https://github.com/CluvexStudio/shabdiz
+git clone https://github.com/CluvexStudio/rakhsh
+cd rakhsh
 cargo build --release
 sudo install -m755 target/release/rakhsh /usr/local/bin/rakhsh
 ```
@@ -88,7 +94,7 @@ the far side. Put each on its host, then:
 ```
 rakhsh check -c /etc/rakhsh.toml     # read the config back in plain words
 rakhsh install -c /etc/rakhsh.toml   # run it as a service
-rakhsh status                        # lanes, throughput, loss, cpu — live
+rakhsh status                        # lanes, throughput, loss, cpu, live
 ```
 
 ## A fleet, from nothing
@@ -135,7 +141,7 @@ final = "tunnel"
 accepts, exactly once, with its default, its units and which side reads it. A test fails if a key
 is missing from it, or if it names one the parser does not read.
 
-[`examples/`](examples) holds configs to start from instead — a working pair per shape, each one
+[`examples/`](examples) holds configs to start from instead, a working pair per shape, each one
 checked by the same test:
 
 | | |
@@ -149,25 +155,25 @@ checked by the same test:
 Their identity values are obvious placeholders; `rakhsh init` writes keys that correspond.
 
 `rakhsh check` reads any config back as prose, including the parts you did not set, and says when a
-key you did set is one this configuration never reads — so a line that does nothing says so instead
+key you did set is one this configuration never reads, so a line that does nothing says so instead
 of looking configured.
 
 ## More
 
 | | |
 |---|---|
-| [CORE.md](https://cluvexstudio.dev/rakhsh/docs/guide/overview/) | inbounds, outbounds and the router |
-| [LINKS.md](https://cluvexstudio.dev/rakhsh/docs/guide/links/) | several ways to reach a peer, and how one is chosen |
-| [SHABDIZ.md](https://cluvexstudio.dev/rakhsh/docs/guide/datagram/) | the datagram carrier, for paths that refuse everything else |
-| [RESUME.md](https://cluvexstudio.dev/rakhsh/docs/guide/resume/) | keeping streams alive across a lane's death |
-| [DNS.md](https://cluvexstudio.dev/rakhsh/docs/guide/dns/) | the resolver and split routing |
-| [LIMITS.md](https://cluvexstudio.dev/rakhsh/docs/guide/limits/) | quotas and rate limits |
-| [CONTROL.md](https://cluvexstudio.dev/rakhsh/docs/guide/control/) | watching and managing a fleet from one host |
-| [SECURITY.md](https://cluvexstudio.dev/rakhsh/docs/guide/security/) | the threat model, and what is actually protected |
+| [CORE.md](CORE.md) | inbounds, outbounds and the router |
+| [LINKS.md](LINKS.md) | several ways to reach a peer, and how one is chosen |
+| [SHABDIZ.md](SHABDIZ.md) | the datagram carrier, for paths that refuse everything else |
+| [RESUME.md](RESUME.md) | keeping streams alive across a lane's death |
+| [DNS.md](DNS.md) | the resolver and split routing |
+| [LIMITS.md](LIMITS.md) | quotas and rate limits |
+| [CONTROL.md](CONTROL.md) | watching and managing a fleet from one host |
+| [SECURITY.md](SECURITY.md) | the threat model, and what is actually protected |
 
 ## Donate
 
-If rakhsh is useful to you, a donation keeps the work going and pays for the servers the
+If Rakhsh is useful to you, a donation keeps the work going and pays for the servers the
 measurements run on. Send only the asset for its network.
 
 | Network | Send | Address |

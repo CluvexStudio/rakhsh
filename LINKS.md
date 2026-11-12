@@ -2,7 +2,7 @@
 
 One carrier is one point of failure. The Iran filter has treated QUIC v2 as 0 Mbit/s in one hour and as
 900 Mbit/s the next; a port gets blocked, a CDN edge dies. With **links** the two ends are configured with
-several carriers at once and the tunnel moves between them by itself — no restart, no editing.
+several carriers at once and the tunnel moves between them by itself, no restart, no editing.
 
 A *link* is a (carrier, address) pair. The top-level `carrier` with `tunnel_listen` / `tunnel_connect` is the
 primary link, `backup_connect` adds more addresses on the same carrier, and every `[[link]]` adds another
@@ -36,11 +36,11 @@ rakhsh check -c entry.toml        # lists the links, in order
 
 - **Accepting side:** listens on every link at once. Lanes from any of them join the same pool, so a user
   connection can ride whichever lanes are up.
-- **Dialing side — racing.** A lane tries the links best first but does not wait for a dead one: if a link has not
+- **Dialing side, racing.** A lane tries the links best first but does not wait for a dead one: if a link has not
   produced an *authenticated* lane within 1.2 s, the next is started in parallel and the first to finish the
   handshake wins. A blocked carrier costs about a second, not its timeout. (Loopback test: a black-holed primary,
   lanes up on the fallback in 1.3 s with a 4 s timeout.)
-- **Dialing side — penalties.** A link that fails is skipped for 3 s, then 6, 12 … up to 60 s, shared by all lanes,
+- **Dialing side, penalties.** A link that fails is skipped for 3 s, then 6, 12 ... up to 60 s, shared by all lanes,
   so a dead carrier costs one timeout once, not one per lane per retry. A link whose lanes keep dying within 15 s of
   coming up counts as failing too (a carrier that handshakes and is then cut must not look healthy).
 - **Failback.** A lane that fell back keeps checking, every `link_probe` seconds (staggered across lanes), whether a
@@ -65,20 +65,20 @@ number of lanes, not per link. `encryption` applies to the whole tunnel.
 ## Verified
 
 Loopback (`fallback_test.py`-style: entry on tcp + quicv2, the primary reached through a forwarder that can be
-switched off): primary up → all lanes on it; primary blocked → lanes on quicv2 in 3 s, data intact; primary back →
-lanes moved up in 2.4 s, data intact; primary black-holed at start → lanes up on the fallback in 1.3 s (attempt
+switched off): primary up -> all lanes on it; primary blocked -> lanes on quicv2 in 3 s, data intact; primary back ->
+lanes moved up in 2.4 s, data intact; primary black-holed at start -> lanes up on the fallback in 1.3 s (attempt
 timeout 4 s), data intact. Real Iran ⇄ Hetzner link, wss primary black-holed with tcp and quicv2 as fallbacks: lanes
 up on tcp 1.35 s after start, 8-stream download over the fallback 814 Mbit/s; with the primary reachable the lanes
-come up on wss in 0.3–0.6 s.
+come up on wss in 0.3-0.6 s.
 
 ## Honest limits
 
 - Both ends must list the same links; the listening side has to listen on each one (a firewall rule per port).
-- Failback replaces a lane, so streams on that lane are reset once — unless `resume = true` (`RESUME.md`), in which case
+- Failback replaces a lane, so streams on that lane are reset once, unless `resume = true` (`RESUME.md`), in which case
   they move to another lane and go on. `link_probe = 0` trades the move for staying put.
 - A losing attempt that had already reached the peer shows up there as a lane that authenticates and ends at once.
 - **A link is "up" when it authenticates and stays up, not when it is fast.** A carrier that the network throttles but
-  does not block (the Iran filter did this to QUIC v2: handshake fine, data at 1–10 Mbit/s) still counts as up, so put
+  does not block (the Iran filter did this to QUIC v2: handshake fine, data at 1-10 Mbit/s) still counts as up, so put
   the carrier you trust most first. Quality-aware selection is not built.
 - A dialing process that is killed abruptly leaves its QUIC lanes alive on the accepting side until the 30 s dead-peer
   timer (a killed TCP lane is noticed at once). Restart the accepting side too, or wait, before judging a restart.

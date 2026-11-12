@@ -1,8 +1,8 @@
-# rakhsh core
+# Rakhsh core
 
-rakhsh started as a tunnel between two servers. It is now a small **network
+Rakhsh started as a tunnel between two servers. It is now a small **network
 core**: the tunnel is one building block, and the same binary can also be a
-proxy, a router, or both at once. Nothing about the tunnel changed — it is just
+proxy, a router, or both at once. Nothing about the tunnel changed, it is just
 one *outbound* among several, and the core is off unless a config asks for it.
 
 ```
@@ -16,15 +16,15 @@ one *outbound* among several, and the core is off unless a config asks for it.
                                                      └─────────────────────┘
 ```
 
-* **Inbound** – where traffic enters: `socks` (SOCKS5 + auth), `http`
+* **Inbound**: where traffic enters: `socks` (SOCKS5 + auth), `http`
   (CONNECT and plain), `mixed` (both on one port, auto-detected), plus the
   existing `[[forward]]` ports and L3 TUN.
-* **Router** – picks an outbound per connection. Rules are tried in order, the
+* **Router**: picks an outbound per connection. Rules are tried in order, the
   first match wins, else `final`. Destination matchers (`domain`,
   `domain_suffix`, `domain_keyword`, `ip_cidr`, `rule_file`) are OR'd inside a
   rule; `port` and `inbound` are extra constraints.
-* **Outbound** – where it goes: `direct` (dial from this host), `tunnel`
-  (the rakhsh lanes to the peer, entry role), `block`, `socks` (chain).
+* **Outbound**: where it goes: `direct` (dial from this host), `tunnel`
+  (the Rakhsh lanes to the peer, entry role), `block`, `socks` (chain).
 
 ## Roles
 
@@ -32,7 +32,7 @@ one *outbound* among several, and the core is off unless a config asks for it.
 |-------|------------|
 | entry | holds the tunnel lanes; may also run proxy inbounds with `direct`/`tunnel`/`block`/`socks` outbounds |
 | exit  | answers the entry's streams; may also run proxy inbounds (`direct`/`block`/`socks`) |
-| node  | standalone core, no tunnel peer — a plain proxy/router (`direct`/`block`/`socks`) |
+| node  | standalone core, no tunnel peer, a plain proxy/router (`direct`/`block`/`socks`) |
 
 ## The headline use: Iranian split routing
 
@@ -95,7 +95,7 @@ datagrams ignored. `socks` (chained) outbounds do not carry UDP.
 ## What it does *not* do yet (honest list)
 
 * DNS: the built-in resolver is `DNS.md`; no fake-IP, DoH or DoT yet.
-* Outbound **groups** (selector, latency-test, failover) — `backup_connect`
+* Outbound **groups** (selector, latency-test, failover), `backup_connect`
   covers tunnel-address failover only.
 * Transparent proxy (Linux TPROXY/redirect) inbound.
 * A control API / panel.
@@ -104,13 +104,13 @@ datagrams ignored. `socks` (chained) outbounds do not carry UDP.
 
 The pieces compose, so the next steps are additive:
 
-1. **DNS** – a DoH/DoT resolver and rule-driven DNS (resolve Iranian names
+1. **DNS**: a DoH/DoT resolver and rule-driven DNS (resolve Iranian names
    locally, foreign ones abroad); UDP itself is done (above).
-2. **Outbound groups** – `urltest` (pick the lowest-latency exit), `selector`, failover between
+2. **Outbound groups**: `urltest` (pick the lowest-latency exit), `selector`, failover between
    outbounds. (Failover between *carriers* of the tunnel itself is done: `LINKS.md`.)
-3. **Multi-hop & mesh** – chain `entry → relay → exit`; with node identities
+3. **Multi-hop & mesh**: chain `entry → relay → exit`; with node identities
    (already Noise keys) a mesh where each node routes to the best peer.
-4. **Transparent mode** – TPROXY/redirect inbound so whole machines or a LAN
+4. **Transparent mode**: TPROXY/redirect inbound so whole machines or a LAN
    use the core with no per-app proxy settings.
-5. **Control plane** – JSON API + live stats (the `check`/`status` seeds are
+5. **Control plane**: JSON API + live stats (the `check`/`status` seeds are
    there), the base for a panel, subscriptions and share links.

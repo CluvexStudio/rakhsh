@@ -1,6 +1,6 @@
 # Control Center: web panel, Telegram bot, fleet
 
-`rakhsh-control` is a **separate binary** that watches and manages a fleet of `rakhsh` nodes from one place —
+`rakhsh-control` is a **separate binary** that watches and manages a fleet of `rakhsh` nodes from one place,
 a web panel, a Telegram bot, live monitoring, in-tunnel speed tests, config backups and scheduled restarts. It is
 deliberately kept out of the tunnel binary so the data path stays lean: the daemon gains only a tiny local Unix
 socket; all the heavy web dependencies live only here.
@@ -19,7 +19,7 @@ socket; all the heavy web dependencies live only here.
 
 ## The daemon side
 
-Every `rakhsh` daemon (entry/exit/node) serves a **local Unix control socket** — no new network port, so its
+Every `rakhsh` daemon (entry/exit/node) serves a **local Unix control socket**, no new network port, so its
 attack surface does not grow. Default `/run/rakhsh.sock`; override with `control_socket` in the config.
 
 ```
@@ -30,7 +30,7 @@ rakhsh speedtest              # measure download throughput through the live tun
 
 The control center reads a node either by its **local socket** (a node on the same host) or by running
 `rakhsh status --json` / `rakhsh speedtest` **over SSH** (a remote node). Logs come from `journalctl`, and the
-Restart/Stop/Start actions run `systemctl`, both over the same SSH — so the daemon itself exposes nothing but the
+Restart/Stop/Start actions run `systemctl`, both over the same SSH, so the daemon itself exposes nothing but the
 read-only local socket.
 
 ## Setup
@@ -49,7 +49,7 @@ rakhsh-control serve -c control.toml    # or serve it in the foreground
   password   tSNaATNRNnb77Ug64Smx
 ```
 
-`--username`, `--password` and `--listen` override it. `sudo ./install.sh` → **Control panel**
+`--username`, `--password` and `--listen` override it. `sudo ./install.sh` -> **Control panel**
 does the whole thing, shows the credentials again on later runs, and can roll the password.
 
 ```toml
@@ -85,39 +85,39 @@ quota_pct = 95
 
 Six live sections (left nav), refreshed every `refresh` seconds:
 
-- **Overview** — per-node KPIs (download/upload with sparklines, streams, lanes), a throughput chart with a
+- **Overview**: per-node KPIs (download/upload with sparklines, streams, lanes), a throughput chart with a
   hover tooltip, radial CPU/memory gauges, a lanes preview and node details. A **Speed test** button runs an
   in-tunnel measurement.
-- **Lanes** — aggregate stats and the full lane table (carrier, up-time, RTT, jitter, loss, health), plus a
+- **Lanes**: aggregate stats and the full lane table (carrier, up-time, RTT, jitter, loss, health), plus a
   per-lane round-trip-time bar chart.
-- **Traffic** — the throughput chart, totals and peaks, and a **fleet comparison** (every node's current
+- **Traffic**: the throughput chart, totals and peaks, and a **fleet comparison** (every node's current
   download/upload side by side) with quota bars.
-- **Security** — the data-protection posture of each node (`full` = AES-256-GCM, or `none` = plaintext, flagged),
-  resume state, and how rakhsh secures the wire.
-- **Logs** — a live terminal view of each node's `journalctl`, colour-coded by level, auto-refreshing.
-- **Settings** — the fleet with **Restart / Stop / Start** buttons per node (confirmed, then run over SSH),
+- **Security**: the data-protection posture of each node (`full` = AES-256-GCM, or `none` = plaintext, flagged),
+  resume state, and how Rakhsh secures the wire.
+- **Logs**: a live terminal view of each node's `journalctl`, colour-coded by level, auto-refreshing.
+- **Settings**: the fleet with **Restart / Stop / Start** buttons per node (confirmed, then run over SSH),
   a **Backup configs** button (downloads every node's config), and control-center info.
 
-The panel is one self-contained page with the fonts embedded, so it renders fully **offline** — important for a
+The panel is one self-contained page with the fonts embedded, so it renders fully **offline**, important for a
 tool used during an internet shutdown.
 
 ## Telegram bot
 
 With `[telegram]` set, the bot answers (only in the configured chat):
 
-- `/status` — a fleet summary that refreshes itself in place
-- `/nodes` — the node list
-- `/node <name>` — full details for one node
-- `/logs <name>` — live logs for a node, refreshing in place
-- `/speedtest` — an in-tunnel speed test, run from the entry
+- `/status`: a fleet summary that refreshes itself in place
+- `/nodes`: the node list
+- `/node <name>`: full details for one node
+- `/logs <name>`: live logs for a node, refreshing in place
+- `/speedtest`: an in-tunnel speed test, run from the entry
 - `/help`, and anything else opens the home menu
 
-Everything is reachable by tapping too: home → status / nodes / speed test, and a node → logs,
-speed test and **Restart** (which asks first). Stop, start and config backups stay in the panel —
+Everything is reachable by tapping too: home -> status / nodes / speed test, and a node -> logs,
+speed test and **Restart** (which asks first). Stop, start and config backups stay in the panel,
 the bot never leaves a node down.
 
 And it sends **alerts** on its own when a node goes offline, a lane's loss or the system CPU crosses the
-threshold, or a quota is nearly full — and once more when it recovers (debounced, not repeated).
+threshold, or a quota is nearly full, and once more when it recovers (debounced, not repeated).
 
 ## Backup & scheduled restart
 
@@ -133,7 +133,7 @@ threshold, or a quota is nearly full — and once more when it recovers (debounc
   added to the tunnel.
 - The **control center** is the thing with power: the panel password gates the API, and the SSH keys it holds can
   manage the nodes. Put it on a trusted host, give it a strong password, use a real certificate if you can, and
-  **firewall the panel port to your own address** — a fleet-control panel on an open port is a target.
+  **firewall the panel port to your own address**, a fleet-control panel on an open port is a target.
 
 ## Build
 

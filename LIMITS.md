@@ -44,8 +44,8 @@ decimal prefixes. Sizes: `500GB`, `1.5TB` (decimal), `10GiB` (binary), or bare b
 - **Quota exhausted:** new connections are refused at once (a forward drops them, a proxy answers "not allowed"),
   and running ones end at their next chunk. When the period rolls over the counter restarts at zero by itself.
 - **Usage survives restarts.** It is saved every 5 s (and only counted for the period it belongs to). Look at it with
-  `rakhsh quota -c entry.toml`; zero it with `rakhsh quota -c entry.toml --reset` — a running rakhsh picks the new
-  file up within seconds. rakhsh logs when a quota reaches 80% and 100%.
+  `rakhsh quota -c entry.toml`; zero it with `rakhsh quota -c entry.toml --reset`, a running Rakhsh picks the new
+  file up within seconds. Rakhsh logs when a quota reaches 80% and 100%.
 - `rakhsh check` lists every scope's limits and rejects a malformed value.
 
 ## Honest limits
